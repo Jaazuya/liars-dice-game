@@ -9,14 +9,17 @@ interface RoundResultProps {
   autoCloseDelay?: number;
 }
 
-export const RoundResult = ({ message, type = 'info', onClose, autoCloseDelay = 5000 }: RoundResultProps) => {
-  // Cerrar automáticamente después del delay
+export const RoundResult = ({ message, type = 'info', onClose, autoCloseDelay }: RoundResultProps) => {
+  // Solo cerrar automáticamente si se proporciona un delay
+  // Si viene de notification_data sincronizada, NO cerrar automáticamente
   useEffect(() => {
-    const timer = setTimeout(() => {
-      onClose();
-    }, autoCloseDelay);
+    if (autoCloseDelay && autoCloseDelay > 0) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, autoCloseDelay);
 
-    return () => clearTimeout(timer);
+      return () => clearTimeout(timer);
+    }
   }, [onClose, autoCloseDelay]);
   const typeStyles = {
     success: {

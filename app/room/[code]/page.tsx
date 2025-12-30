@@ -19,13 +19,8 @@ export default function RoomPage() {
   const { players, myId, gameState, getDiceEmoji, actions } = useLiarGame(
     code as string,
     (message, type) => setNotification({ message, type }),
-    (message, type, onCloseCallback) => {
-      setRoundResult({ message, type });
-      // Guardar el callback para cuando se cierre el anuncio
-      if (onCloseCallback) {
-        roundResultCallbackRef.current = onCloseCallback;
-      }
-    }
+    // onRoundResult ya no se usa, las notificaciones vienen de gameState.notificationData
+    undefined
   );
   const sounds = useGameSounds(true);
   
@@ -37,9 +32,7 @@ export default function RoomPage() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type?: 'success' | 'error' | 'info' | 'warning' } | null>(null);
-  const [roundResult, setRoundResult] = useState<{ message: string; type?: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
-  const roundResultCallbackRef = useRef<(() => void) | null>(null);
 
   // Detectar si es móvil
   useEffect(() => {
@@ -130,10 +123,10 @@ export default function RoomPage() {
   };
 
   return (
-    <main className="fixed inset-0 bg-[#0d0d0d] font-serif flex flex-col overflow-hidden">
+    <main className="min-h-screen bg-[#0d0d0d] font-serif flex flex-col relative">
       
-      {/* Fondo Común */}
-      <div className="absolute inset-0 pointer-events-none opacity-40 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-repeat z-0"></div>
+      {/* Fondo Común - Fijo */}
+      <div className="fixed inset-0 -z-10 pointer-events-none opacity-40 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-repeat"></div>
 
       {/* --- MODAL VOTACIÓN (Siempre encima) --- */}
       {showKickModal && gameState.voteData && (
@@ -167,21 +160,15 @@ export default function RoomPage() {
       {/* --- FASE 3: MESA DE JUEGO --- */}
       {/* Solo visible si la sala está 'playing' Y yo ya pagué */}
       <div 
-        className={`flex-1 flex flex-col relative z-10 w-full h-full overflow-hidden transition-opacity duration-1000 ${gameState.status === 'playing' && myPlayer?.is_ready ? 'opacity-100' : 'opacity-0 pointer-events-none hidden'}`}
-        style={{
-          overflow: zoomLevel > 1 ? 'auto' : 'hidden',
-          touchAction: zoomLevel > 1 ? 'pan-x pan-y' : 'auto'
-        }}
+        className={`flex-1 flex flex-col relative z-10 w-full min-h-screen transition-opacity duration-1000 ${gameState.status === 'playing' && myPlayer?.is_ready ? 'opacity-100' : 'opacity-0 pointer-events-none hidden'}`}
       >
         <div 
           ref={gameContainerRef}
-          className="w-full h-full"
+          className="w-full"
           style={{
             transform: `scale(${zoomLevel})`,
             transformOrigin: 'top center',
-            transition: 'transform 0.2s ease-out',
-            minHeight: zoomLevel > 1 ? `${100 * zoomLevel}%` : '100%',
-            minWidth: zoomLevel > 1 ? `${100 * zoomLevel}%` : '100%'
+            transition: 'transform 0.2s ease-out'
           }}
         >
             
@@ -415,20 +402,17 @@ export default function RoomPage() {
         )}
       </AnimatePresence>
 
-      {/* RESULTADO DE RONDA (Anuncio Grande) */}
+      {/* RESULTADO DE RONDA (Anuncio Grande) - Sincronizado Globalmente */}
       <AnimatePresence>
-        {roundResult && (
+        {gameState.notificationData && (
           <RoundResult
-            message={roundResult.message}
-            type={roundResult.type}
+            message={gameState.notificationData.message}
+            type={gameState.notificationData.type}
             onClose={() => {
-              setRoundResult(null);
-              // Ejecutar el callback de barajeo cuando se cierra el anuncio
-              if (roundResultCallbackRef.current) {
-                roundResultCallbackRef.current();
-                roundResultCallbackRef.current = null;
-              }
+              // No hacer nada aquí, el Host manejará el siguiente paso automáticamente
+              // La notificación desaparecerá cuando notification_data se limpie en la BD
             }}
+            autoCloseDelay={undefined}
           />
         )}
       </AnimatePresence>

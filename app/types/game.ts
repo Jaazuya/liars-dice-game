@@ -16,6 +16,13 @@ export interface VoteData {
     votes: Record<string, boolean>; // mapa de { "id_jugador": true/false }
 }
 
+export interface NotificationData {
+    message: string;
+    type: 'success' | 'error' | 'info' | 'warning';
+    loserId: string;
+    timestamp: number;
+}
+
 export interface GameState {
     status: 'waiting' | 'boarding' | 'playing'; // NUEVO ESTADO 'boarding'
     pot: number;
@@ -26,4 +33,5 @@ export interface GameState {
         face: number;
     };
     voteData: VoteData | null; // NUEVO
+    notificationData: NotificationData | null; // Notificación global sincronizada
 }

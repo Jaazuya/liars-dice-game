@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/app/lib/supabase';
-import { Player, GameState, VoteData } from '@/app/types/game';
+import { Player, GameState, VoteData, NotificationData } from '@/app/types/game';
 
 export const useLiarGame = (
     code: string, 
@@ -15,11 +15,14 @@ export const useLiarGame = (
         entryFee: 100,
         currentTurnId: null,
         currentBet: { quantity: 0, face: 0 },
-        voteData: null
+        voteData: null,
+        notificationData: null
     });
 
     // Ref para evitar múltiples ejecuciones del auto-start
     const hasCheckedAllReady = useRef(false);
+    // Ref para evitar múltiples timeouts de notificación
+    const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const getDiceEmoji = (num: number) => ['?', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][num] || '?';
 
@@ -53,7 +56,8 @@ export const useLiarGame = (
                         quantity: r.current_bet_quantity || 0, 
                         face: r.current_bet_face || 0 
                     },
-                    voteData: r.kick_vote_data
+                    voteData: r.kick_vote_data,
+                    notificationData: r.notification_data || null
                 }));
             }
         };
@@ -85,7 +89,8 @@ export const useLiarGame = (
                     voteData: r.kick_vote_data,
                     currentBet: r.current_bet_quantity !== undefined 
                         ? { quantity: r.current_bet_quantity, face: r.current_bet_face } 
-                        : prev.currentBet
+                        : prev.currentBet,
+                    notificationData: r.notification_data !== undefined ? r.notification_data : prev.notificationData
                 }));
             })
             .subscribe();
@@ -290,6 +295,87 @@ export const useLiarGame = (
         return null;
     };
 
+    // --- FUNCIÓN: Manejar siguiente ronda (solo Host) ---
+    const handleNextRound = async (loserId: string) => {
+        // Obtener jugadores actualizados
+        const { data: currentPlayers } = await supabase
+            .from('players')
+            .select('*')
+            .eq('room_code', code)
+            .order('created_at', { ascending: true });
+
+        if (!currentPlayers) return;
+
+        const survivors = currentPlayers.filter(p => (p.dice_values?.length || 0) > 0);
+        
+        if (survivors.length === 1) {
+            // Ya hay ganador, no hacer nada
+            return;
+        }
+
+        // RE-BARAJEAR DADOS para todos los sobrevivientes
+        const reShuffleUpdates = survivors.map(p => {
+            const currentDiceCount = p.dice_values?.length || 5;
+            const newDice = Array.from({ length: currentDiceCount }, () => 
+                Math.floor(Math.random() * 6) + 1
+            );
+            return supabase
+                .from('players')
+                .update({ dice_values: newDice })
+                .eq('id', p.id);
+        });
+        await Promise.all(reShuffleUpdates);
+
+        // Pasar turno al perdedor (o siguiente activo si el perdedor fue eliminado)
+        let nextTurnPlayer = currentPlayers.find(p => p.id === loserId);
+        if (!nextTurnPlayer || (nextTurnPlayer.dice_values?.length || 0) === 0) {
+            nextTurnPlayer = getNextActivePlayer(loserId, currentPlayers) || survivors[0];
+        }
+
+        if (nextTurnPlayer) {
+            await supabase
+                .from('rooms')
+                .update({ 
+                    current_bet_quantity: 0, 
+                    current_bet_face: 0,
+                    current_turn_player_id: nextTurnPlayer.id,
+                    notification_data: null // Limpiar notificación
+                })
+                .eq('code', code);
+        }
+    };
+
+    // --- CONTROL DE TIEMPO: El Host ejecuta handleNextRound después de 5 segundos ---
+    useEffect(() => {
+        const myPlayer = players.find(p => p.id === myId);
+        const isHost = myPlayer?.is_host || false;
+
+        // Limpiar timeout anterior si existe
+        if (notificationTimeoutRef.current) {
+            clearTimeout(notificationTimeoutRef.current);
+            notificationTimeoutRef.current = null;
+        }
+
+        // Si hay notificación y soy el host, iniciar el timer
+        if (gameState.notificationData && isHost && gameState.status === 'playing') {
+            const notificationData = gameState.notificationData;
+            const loserId = notificationData.loserId;
+
+            if (loserId) {
+                notificationTimeoutRef.current = setTimeout(async () => {
+                    await handleNextRound(loserId);
+                    notificationTimeoutRef.current = null;
+                }, 5000);
+            }
+        }
+
+        return () => {
+            if (notificationTimeoutRef.current) {
+                clearTimeout(notificationTimeoutRef.current);
+            }
+        };
+    }, [gameState.notificationData, players, myId, gameState.status, code]);
+
     // --- LÓGICA DE JUEGO: APUESTAS Y RESOLUCIÓN ---
 
     const placeBet = async (qty: number, face: number) => {
@@ -468,68 +554,32 @@ export const useLiarGame = (
                     pot: 0, 
                     current_bet_quantity: 0,
                     current_bet_face: 0,
-                    current_turn_player_id: null
+                    current_turn_player_id: null,
+                    notification_data: null
                 })
                 .eq('code', code);
 
-            // Mostrar mensaje grande para el ganador
-            onRoundResult?.(`🏆 ¡GANADOR: ${winner.name}! Se lleva $${potAmount}`, 'success');
+            // Mostrar mensaje grande para el ganador (local)
             onNotification?.(`🏆 ¡GANADOR: ${winner.name}! Se lleva $${potAmount}`, 'success');
         } else {
-            // Mostrar mensaje grande y esperar a que se cierre antes de barajear
+            // Determinar tipo de notificación
             const notificationType = message.includes('❌') || message.includes('ERROR') ? 'error' : 
                                      message.includes('✅') || message.includes('CORRECTO') ? 'success' :
                                      message.includes('🎯') || message.includes('EXACTO') ? 'success' : 'info';
             
-            // Mostrar anuncio grande con callback para cuando se cierre
-            onRoundResult?.(message, notificationType, async () => {
-                // Esta función se ejecutará cuando el anuncio se cierre (después de 5 segundos)
-            // Obtener jugadores actualizados nuevamente
-            const { data: finalPlayers } = await supabase
-                .from('players')
-                .select('*')
-                .eq('room_code', code)
-                .order('created_at', { ascending: true });
+            // 🚫 NO USAR onRoundResult (callback local)
+            // ✅ GUARDAR EN SUPABASE para que todos lo vean
+            const notificationData: NotificationData = {
+                message,
+                type: notificationType,
+                loserId: loserId,
+                timestamp: Date.now()
+            };
 
-            if (!finalPlayers) return;
-
-            const finalSurvivors = finalPlayers.filter(p => (p.dice_values?.length || 0) > 0);
-            
-            if (finalSurvivors.length === 1) {
-                // Ya se manejó el ganador arriba, solo notificar
-                return;
-            } else {
-                // RE-BARAJEAR DADOS para todos los sobrevivientes
-                const reShuffleUpdates = finalSurvivors.map(p => {
-                    const currentDiceCount = p.dice_values?.length || 5;
-                    const newDice = Array.from({ length: currentDiceCount }, () => 
-                        Math.floor(Math.random() * 6) + 1
-                    );
-                    return supabase
-                        .from('players')
-                        .update({ dice_values: newDice })
-                        .eq('id', p.id);
-                });
-                await Promise.all(reShuffleUpdates);
-
-                // Pasar turno al perdedor (o siguiente activo si el perdedor fue eliminado)
-                let nextTurnPlayer = finalPlayers.find(p => p.id === loserId);
-                if (!nextTurnPlayer || (nextTurnPlayer.dice_values?.length || 0) === 0) {
-                    nextTurnPlayer = getNextActivePlayer(loserId, finalPlayers) || finalSurvivors[0];
-                }
-
-                if (nextTurnPlayer) {
-                    await supabase
-                        .from('rooms')
-                        .update({ 
-                            current_bet_quantity: 0, 
-                            current_bet_face: 0,
-                            current_turn_player_id: nextTurnPlayer.id 
-                        })
-                        .eq('code', code);
-                }
-            }
-            });
+            await supabase
+                .from('rooms')
+                .update({ notification_data: notificationData })
+                .eq('code', code);
         }
     };
 
