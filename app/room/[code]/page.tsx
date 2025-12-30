@@ -5,13 +5,13 @@ import { useLiarGame } from '@/app/hooks/useLiarGame';
 import { useGameSounds } from '@/app/hooks/useGameSounds';
 import { Lobby } from '@/app/components/Lobby';
 import { WantedIntro } from '@/app/components/WantedIntro';
-import { KickModal } from '@/app/components/KickModal';
 import { RivalsStrip, GameTable, TopBar } from '@/app/components/GameComponents';
 import { AnimatedDice } from '@/app/components/AnimatedDice';
 import { DiceCup } from '@/app/components/DiceCup';
 import { GameSettings } from '@/app/components/GameSettings';
 import { GameNotification } from '@/app/components/GameNotification';
 import { RoundResult } from '@/app/components/RoundResult';
+import { GameOverScreen } from '@/app/components/GameOverScreen';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function RoomPage() {
@@ -96,8 +96,6 @@ export default function RoomPage() {
   const isMyTurn = gameState.currentTurnId === myId;
   const amIEliminated = (myPlayer?.dice_values?.length || 0) === 0;
 
-  // Lógica Modal Votación
-  const showKickModal = gameState.voteData && gameState.voteData.target_id !== myId && !gameState.voteData.votes[myId];
 
   // Funciones de zoom (incrementos de 5%)
   const handleZoomIn = () => {
@@ -128,23 +126,22 @@ export default function RoomPage() {
       {/* Fondo Común - Fijo */}
       <div className="fixed inset-0 -z-10 pointer-events-none opacity-40 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-repeat"></div>
 
-      {/* --- MODAL VOTACIÓN (Siempre encima) --- */}
-      {showKickModal && gameState.voteData && (
-          <KickModal voteData={gameState.voteData} onVote={actions.castVote} />
-      )}
 
-      {/* --- FASE 1: LOBBY DE ESPERA --- */}
-      {gameState.status === 'waiting' && (
-        <Lobby 
-            code={code} 
-            players={players} 
-            isHost={myPlayer?.is_host} 
-            entryFee={gameState.entryFee} 
-            onUpdateFee={actions.updateEntryFee} 
-            onStart={actions.openTable} 
-            onKick={actions.startKickVote} 
-        />
-      )}
+          {/* --- FASE 1: LOBBY DE ESPERA --- */}
+          {gameState.status === 'waiting' && (
+            <Lobby
+                code={code}
+                players={players}
+                isHost={myPlayer?.is_host}
+                entryFee={gameState.entryFee}
+                onUpdateFee={actions.updateEntryFee}
+                onStart={actions.openTable}
+                onKick={actions.kickPlayer}
+                onAbandon={actions.abandonGame}
+                allowCheats={gameState.allowCheats}
+                onToggleCheats={actions.toggleCheats}
+            />
+          )}
 
       {/* --- FASE 2: CARTEL DE APUESTAS (BOARDING) --- */}
       {/* Se muestra si la sala está en 'boarding', O si ya está en 'playing' pero yo no estoy listo aún */}
@@ -153,7 +150,10 @@ export default function RoomPage() {
               entryFee={gameState.entryFee} 
               players={players}
               myId={myId}
-              onPay={actions.payEntry} 
+              onPay={actions.payEntry}
+              onKick={actions.kickPlayer}
+              isHost={myPlayer?.is_host}
+              onAbandon={actions.abandonGame}
           />
       )}
 
@@ -162,6 +162,13 @@ export default function RoomPage() {
       <div 
         className={`flex-1 flex flex-col relative z-10 w-full min-h-screen transition-opacity duration-1000 ${gameState.status === 'playing' && myPlayer?.is_ready ? 'opacity-100' : 'opacity-0 pointer-events-none hidden'}`}
       >
+        {/* Botón Abandonar (Esquina superior izquierda) */}
+        <button
+          onClick={actions.abandonGame}
+          className="absolute top-4 left-4 bg-red-900/80 hover:bg-red-700 text-white font-rye px-4 py-2 rounded border-2 border-red-800 shadow-lg transition-all z-50"
+        >
+          🚪 Abandonar
+        </button>
         <div 
           ref={gameContainerRef}
           className="w-full"
@@ -184,7 +191,7 @@ export default function RoomPage() {
                 myId={myId} 
                 currentTurnId={gameState.currentTurnId} 
                 amIHost={!!myPlayer?.is_host}
-                onKick={actions.startKickVote} // Aquí también funciona el kick durante el juego
+                onKick={actions.kickPlayer} // Expulsión inmediata del Host
             />
 
             <GameTable 
@@ -234,6 +241,34 @@ export default function RoomPage() {
                                     </motion.button>
                                 </div>
                             )}
+                            
+                            {/* BOTÓN DE ESPIONAJE (Truco) */}
+                            {gameState.allowCheats && gameState.currentBet.quantity > 0 && (
+                                <motion.button
+                                    onClick={async () => {
+                                        sounds.playButtonClick();
+                                        const count = await actions.useCheat();
+                                        if (count !== null) {
+                                            const diceEmoji = getDiceEmoji(gameState.currentBet.face);
+                                            setNotification({
+                                                message: `🕵️ Psst... Hay exactamente ${count} dados de ${diceEmoji}.`,
+                                                type: 'info'
+                                            });
+                                        }
+                                    }}
+                                    disabled={myPlayer?.has_used_cheat || false}
+                                    whileHover={{ scale: myPlayer?.has_used_cheat ? 1 : 1.05 }}
+                                    whileTap={{ scale: myPlayer?.has_used_cheat ? 1 : 0.95 }}
+                                    className={`w-full bg-[#6a1b9a] text-[#e1bee7] font-rye text-sm sm:text-base md:text-lg py-2 sm:py-2.5 md:py-3 rounded-lg sm:rounded-xl border-b-[4px] sm:border-b-[6px] border-[#4a148c] active:border-b-0 active:translate-y-1 shadow-xl flex items-center justify-center gap-2 ${
+                                        myPlayer?.has_used_cheat ? 'opacity-50 cursor-not-allowed grayscale' : ''
+                                    }`}
+                                    title={myPlayer?.has_used_cheat ? 'Ya usaste tu truco' : 'Espiar dados en la mesa (solo una vez por partida)'}
+                                >
+                                    <span>👁️</span>
+                                    <span>{myPlayer?.has_used_cheat ? 'TRUCO USADO' : 'ESPiar'}</span>
+                                </motion.button>
+                            )}
+                            
                             <div className="flex flex-col gap-2 sm:gap-3 md:gap-4 bg-black/40 p-2 sm:p-3 md:p-4 lg:p-5 rounded-xl sm:rounded-2xl border-2 border-[#5d4037] w-full">
                                 <div className="flex flex-col items-center w-full">
                                     <label className="text-[#ffb300] font-sans text-[9px] sm:text-[10px] md:text-xs tracking-[0.2em] sm:tracking-[0.3em] mb-1 sm:mb-2 font-bold">CANTIDAD</label>
@@ -413,6 +448,19 @@ export default function RoomPage() {
               // La notificación desaparecerá cuando notification_data se limpie en la BD
             }}
             autoCloseDelay={undefined}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* PANTALLA DE FIN DE JUEGO */}
+      <AnimatePresence>
+        {gameState.gameOverData && (
+          <GameOverScreen
+            gameOverData={gameState.gameOverData}
+            players={players}
+            myId={myId}
+            isHost={!!myPlayer?.is_host}
+            onReset={actions.resetRoom}
           />
         )}
       </AnimatePresence>

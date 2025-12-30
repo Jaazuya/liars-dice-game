@@ -3,7 +3,7 @@ import { Player } from "@/app/types/game";
 import { useState } from "react";
 import { motion } from 'framer-motion';
 
-export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, onKick }: any) => {
+export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, onKick, onAbandon, allowCheats, onToggleCheats }: any) => {
     const [copied, setCopied] = useState(false);
 
     const copyCode = () => {
@@ -14,6 +14,15 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
 
     return (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-10 w-full min-h-screen bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-[#2d1b15]">
+            {/* Botón Abandonar (Esquina superior izquierda) */}
+            {onAbandon && (
+                <button
+                    onClick={onAbandon}
+                    className="absolute top-4 left-4 bg-red-900/80 hover:bg-red-700 text-white font-rye px-4 py-2 rounded border-2 border-red-800 shadow-lg transition-all z-50"
+                >
+                    🚪 Abandonar
+                </button>
+            )}
             
             {/* TABLÓN PRINCIPAL DE MADERA */}
             <div className="bg-[#3e2723] p-8 md:p-12 rounded-sm border-[8px] border-[#5d4037] shadow-[20px_20px_0px_rgba(0,0,0,0.5)] w-full max-w-lg relative animate-in zoom-in duration-300">
@@ -54,6 +63,36 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
                     </div>
                 </div>
 
+                {/* CONFIGURACIÓN DE TRUCOS (Host Control) */}
+                <div className="bg-[#4e342e] p-4 rounded mb-6 border-2 border-[#6d4c41] shadow-lg">
+                    <div className="flex flex-col gap-2">
+                        <span className="text-[#d7ccc8] text-xs uppercase tracking-widest font-bold border-b border-[#8d6e63] pb-1">🃏 Modo con Trucos</span>
+                        
+                        {isHost ? (
+                            <div className="flex items-center justify-center gap-4 mt-2">
+                                <span className="font-rye text-lg text-[#d7ccc8]">Desactivado</span>
+                                <button 
+                                    onClick={onToggleCheats}
+                                    className={`relative w-14 h-8 rounded-full transition-colors duration-200 ${
+                                        allowCheats ? 'bg-[#4caf50]' : 'bg-[#5d4037]'
+                                    }`}
+                                >
+                                    <span 
+                                        className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-transform duration-200 ${
+                                            allowCheats ? 'translate-x-6' : 'translate-x-0'
+                                        }`}
+                                    />
+                                </button>
+                                <span className="font-rye text-lg text-[#d7ccc8]">Activado</span>
+                            </div>
+                        ) : (
+                            <div className="font-rye text-lg text-[#d7ccc8] mt-2 text-center">
+                                {allowCheats ? '🃏 Trucos: Activados' : '🃏 Trucos: Desactivados'}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 {/* LISTA DE JUGADORES (Con dinero y botón Kick) */}
                 <div className="mb-8">
                     <div className="flex justify-between items-end mb-2 px-1">
@@ -76,9 +115,9 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
                                     {/* BOTÓN EXPULSAR (Solo lo ve el Host) */}
                                     {isHost && !p.is_host && (
                                         <button 
-                                            onClick={() => onKick(p.id, p.name)}
+                                            onClick={() => onKick(p.id)}
                                             className="opacity-0 group-hover:opacity-100 bg-red-900/80 hover:bg-red-600 text-white w-8 h-8 rounded flex items-center justify-center transition-all border border-red-800"
-                                            title="Iniciar votación para expulsar"
+                                            title="Expulsar jugador (acción inmediata)"
                                         >
                                             💀
                                         </button>

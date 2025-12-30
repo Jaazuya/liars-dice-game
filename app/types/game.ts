@@ -7,6 +7,8 @@ export interface Player {
     money: number;
     current_contribution: number;
     is_ready: boolean; // NUEVO
+    seat_index: number | null; // Índice de asiento aleatorio
+    has_used_cheat: boolean; // Si ya usó el truco de espionaje
 }
 
 export interface VoteData {
@@ -23,6 +25,19 @@ export interface NotificationData {
     timestamp: number;
 }
 
+export interface GameOverData {
+    winner: string;
+    winnerName: string;
+    runnerUp: string | null;
+    runnerUpName: string | null;
+    amounts: {
+        winner: number;
+        runnerUp: number;
+    };
+    losers: string[];
+    totalPot: number;
+}
+
 export interface GameState {
     status: 'waiting' | 'boarding' | 'playing'; // NUEVO ESTADO 'boarding'
     pot: number;
@@ -34,4 +49,6 @@ export interface GameState {
     };
     voteData: VoteData | null; // NUEVO
     notificationData: NotificationData | null; // Notificación global sincronizada
+    gameOverData: GameOverData | null; // Datos de fin de juego
+    allowCheats: boolean; // Si la sala permite trucos
 }

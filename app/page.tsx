@@ -29,7 +29,7 @@ export default function Home() {
     }
   };
 
-  // Función UNIRSE A SALA (Nueva)
+  // Función UNIRSE A SALA (Nueva) - Permite late join como espectador
   const joinRoom = async () => {
     if (!name.trim() || !joinCode.trim()) return alert('Pon tu nombre y el código de la sala.');
     setIsLoading(true);
@@ -37,8 +37,12 @@ export default function Home() {
     const codeUpper = joinCode.toUpperCase();
 
     try {
-      // 1. Verificar si la sala existe
-      const { data: roomData } = await supabase.from('rooms').select('code').eq('code', codeUpper).single();
+      // 1. Verificar si la sala existe y obtener su estado
+      const { data: roomData } = await supabase
+        .from('rooms')
+        .select('code, status')
+        .eq('code', codeUpper)
+        .single();
       
       if (!roomData) {
         alert('Esa sala no existe, compañero.');
@@ -47,9 +51,26 @@ export default function Home() {
       }
 
       // 2. Insertar jugador en la sala
+      // Si el juego ya está en progreso, crear como espectador (sin dados, sin dinero inicial)
+      const playerData: any = {
+        id: playerId,
+        room_code: codeUpper,
+        name: name,
+        is_host: false,
+        seat_index: null // No tiene asiento si entra tarde
+      };
+
+      // Si el juego ya está en progreso, entrar como espectador
+      if (roomData.status === 'playing') {
+        playerData.dice_values = []; // Array vacío = espectador
+        playerData.money = 0; // Sin dinero inicial
+        playerData.current_contribution = 0;
+        playerData.is_ready = false;
+      }
+
       const { error } = await supabase
         .from('players')
-        .insert([{ id: playerId, room_code: codeUpper, name: name, is_host: false }]);
+        .insert([playerData]);
 
       if (error) throw error;
 

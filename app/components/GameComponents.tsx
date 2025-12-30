@@ -58,7 +58,7 @@ export const TopBar = ({ me, pot, myTurn, turnName }: { me?: Player, pot: number
 );
 
 // --- 2. TIRA DE RIVALES (CON BOTÓN EXPULSAR) ---
-export const RivalsStrip = ({ players, myId, currentTurnId, amIHost, onKick }: { players: Player[], myId: string, currentTurnId: string | null, amIHost: boolean, onKick: (id: string, name: string) => void }) => (
+export const RivalsStrip = ({ players, myId, currentTurnId, amIHost, onKick }: { players: Player[], myId: string, currentTurnId: string | null, amIHost: boolean, onKick: (id: string) => void }) => (
     <div className="w-full overflow-x-auto flex gap-3 p-4 no-scrollbar shrink-0 h-auto items-start bg-[#1a0f0d] border-b border-[#5d4037]">
         {players.filter(p => p.id !== myId).map(rival => (
             <motion.div 
@@ -75,11 +75,11 @@ export const RivalsStrip = ({ players, myId, currentTurnId, amIHost, onKick }: {
                 {/* BOTÓN EXPULSAR (Solo lo ve el Host) */}
                 {amIHost && (
                     <motion.button 
-                        onClick={() => onKick(rival.id, rival.name)}
+                        onClick={() => onKick(rival.id)}
                         whileHover={{ scale: 1.2 }}
                         whileTap={{ scale: 0.9 }}
                         className="absolute -top-2 -right-2 z-20 w-6 h-6 bg-red-900 text-white rounded-full flex items-center justify-center text-[10px] border border-red-500 shadow hover:bg-red-700 transition-colors"
-                        title="Expulsar jugador"
+                        title="Expulsar jugador (acción inmediata)"
                     >
                         💀
                     </motion.button>
