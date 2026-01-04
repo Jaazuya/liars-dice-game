@@ -1,24 +1,18 @@
 import type { Metadata } from "next";
-import { Rye, DM_Serif_Display } from "next/font/google"; // Importamos fuentes
+import { Rye } from "next/font/google";
 import "./globals.css";
 
 // Fuente principal del Oeste (Títulos y Números)
 const rye = Rye({ 
   weight: "400", 
   subsets: ["latin"],
-  variable: "--font-rye" 
-});
-
-// Fuente secundaria más legible (Textos largos)
-const dmSerif = DM_Serif_Display({ 
-  weight: "400", 
-  subsets: ["latin"],
-  variable: "--font-dm" 
+  variable: "--font-rye",
+  display: "swap"
 });
 
 export const metadata: Metadata = {
   title: "Liar's Dice - Old West",
-  description: "Juego de apuestas y dados",
+  description: "Juego de apuestas y dados del Lejano Oeste",
 };
 
 export default function RootLayout({
@@ -28,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className={`${rye.variable} ${dmSerif.variable} antialiased bg-[#0d0d0d]`}>
+      <body className={`${rye.variable} antialiased bg-[#1a0f0d]`}>
         {children}
       </body>
     </html>

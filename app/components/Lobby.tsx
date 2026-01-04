@@ -2,6 +2,7 @@
 import { Player } from "@/app/types/game";
 import { useState } from "react";
 import { motion } from 'framer-motion';
+import { WesternDecor } from './WesternDecor';
 
 export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, onKick, onAbandon, allowCheats, onToggleCheats }: any) => {
     const [copied, setCopied] = useState(false);
@@ -13,7 +14,8 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
     };
 
     return (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-10 w-full min-h-screen bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-[#2d1b15]">
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-10 w-full min-h-screen bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-[#2d1b15] relative overflow-hidden">
+            <WesternDecor variant="corners" className="opacity-30" />
             {/* Botón Abandonar (Esquina superior izquierda) */}
             {onAbandon && (
                 <button

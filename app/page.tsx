@@ -6,6 +6,7 @@ import { supabase } from './lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
+import { WesternDecor } from './components/WesternDecor';
 
 interface TopPlayer {
   username: string;
@@ -137,13 +138,14 @@ export default function Home() {
     return (
       <main className="min-h-screen bg-[#1a0f0d] flex flex-col items-center justify-center p-4 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+        <WesternDecor variant="full" className="opacity-30" />
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5 }}
           className="relative z-10 text-center"
         >
-          <h1 className="text-6xl font-bold text-[#ffb300] mb-4 drop-shadow-[3px_3px_0px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'serif', letterSpacing: '0.1em' }}>
+          <h1 className="text-6xl font-rye font-bold text-[#ffb300] mb-4 drop-shadow-[3px_3px_0px_rgba(0,0,0,0.8)]">
             LIAR'S DICE
           </h1>
           <p className="text-[#d7ccc8] text-xl mb-8 uppercase tracking-widest">El Saloon te espera</p>
@@ -151,8 +153,7 @@ export default function Home() {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => router.push('/login')}
-            className="bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-6 px-12 rounded-lg border-4 border-[#ff6f00] shadow-[0_0_30px_rgba(255,179,0,0.5)] text-2xl uppercase tracking-wider transition-all"
-            style={{ fontFamily: 'serif' }}
+            className="bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-6 px-12 rounded-lg border-4 border-[#ff6f00] shadow-[0_0_30px_rgba(255,179,0,0.5)] text-2xl uppercase tracking-wider transition-all"
           >
             ENTRAR AL SALOON
           </motion.button>
@@ -177,17 +178,18 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#1a0f0d] flex flex-col p-4 relative overflow-hidden">
       <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+      <WesternDecor variant="corners" className="opacity-40" />
       
       {/* Header */}
       <header className="relative z-10 w-full max-w-4xl mx-auto mb-8">
-        <div className="bg-[#3e2723] border-[4px] border-[#ffb300] rounded-lg p-4 shadow-lg flex items-center justify-between">
+        <div className="bg-[#3e2723] border-[4px] border-[#ffb300] rounded-lg p-4 shadow-lg flex items-center justify-between wood-texture">
           <div className="flex items-center gap-4">
             {/* Avatar */}
             <div className="w-16 h-16 rounded-full bg-[#1a0f0d] border-2 border-[#ffb300] flex items-center justify-center text-2xl font-bold text-[#ffb300]">
               {profile?.username ? getInitial(profile.username) : '?'}
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-[#ffb300]" style={{ fontFamily: 'serif' }}>
+              <h2 className="text-2xl font-rye font-bold text-[#ffb300]">
                 {profile?.username || 'Forastero'}
               </h2>
               <div className="flex items-center gap-2 text-[#d7ccc8]">
@@ -198,8 +200,7 @@ export default function Home() {
           </div>
           <button
             onClick={handleSignOut}
-            className="bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] px-4 py-2 rounded border border-[#8d6e63] transition-colors text-sm uppercase"
-            style={{ fontFamily: 'serif' }}
+            className="bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] px-4 py-2 rounded border border-[#8d6e63] transition-colors text-sm uppercase font-rye"
           >
             Salir
           </button>
@@ -213,15 +214,14 @@ export default function Home() {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setShowTop5(true)}
-          className="mb-8 bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-4 px-8 rounded-lg border-4 border-[#ff6f00] shadow-lg text-xl uppercase tracking-wider transition-all"
-          style={{ fontFamily: 'serif' }}
+          className="mb-8 bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-4 px-8 rounded-lg border-4 border-[#ff6f00] shadow-lg text-xl uppercase tracking-wider transition-all"
         >
           🏆 TOP 5
         </motion.button>
 
         {/* Controles de Sala */}
-        <div className="bg-[#3e2723] border-[4px] border-[#5d4037] rounded-lg p-8 w-full shadow-2xl">
-          <h3 className="text-2xl font-bold text-[#ffb300] mb-6 text-center uppercase" style={{ fontFamily: 'serif' }}>
+        <div className="bg-[#3e2723] border-[4px] border-[#5d4037] rounded-lg p-8 w-full shadow-2xl wood-texture">
+          <h3 className="text-2xl font-rye font-bold text-[#ffb300] mb-6 text-center uppercase">
             Crear o Unirse a Sala
           </h3>
 
@@ -229,8 +229,7 @@ export default function Home() {
             <button 
               onClick={createRoom}
               disabled={isLoading}
-              className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase text-lg"
-              style={{ fontFamily: 'serif' }}
+              className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase text-lg"
             >
               {isLoading ? 'Cargando...' : 'CREAR SALA NUEVA'}
             </button>
@@ -247,8 +246,7 @@ export default function Home() {
               <button 
                 onClick={joinRoom}
                 disabled={isLoading}
-                className="flex-1 bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-bold py-3 rounded border-2 border-[#8d6e63] transition-all uppercase"
-                style={{ fontFamily: 'serif' }}
+                className="flex-1 bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-rye font-bold py-3 rounded border-2 border-[#8d6e63] transition-all uppercase"
               >
                 UNIRSE
               </button>
@@ -274,7 +272,7 @@ export default function Home() {
               className="bg-[#3e2723] border-[6px] border-[#ffb300] rounded-lg shadow-2xl max-w-md w-full p-8 relative"
               onClick={(e) => e.stopPropagation()}
             >
-              <h2 className="text-3xl font-bold text-[#ffb300] mb-6 text-center uppercase" style={{ fontFamily: 'serif' }}>
+              <h2 className="text-3xl font-rye font-bold text-[#ffb300] mb-6 text-center uppercase">
                 🏆 TOP 5 JUGADORES
               </h2>
               
@@ -292,7 +290,7 @@ export default function Home() {
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-2xl">#{index + 1}</span>
-                        <span className="text-xl font-bold text-[#ffb300]" style={{ fontFamily: 'serif' }}>
+                        <span className="text-xl font-rye font-bold text-[#ffb300]">
                           {player.username}
                         </span>
                       </div>
@@ -307,8 +305,7 @@ export default function Home() {
 
               <button
                 onClick={() => setShowTop5(false)}
-                className="mt-6 w-full bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-bold py-3 rounded border-2 border-[#8d6e63] transition-colors uppercase"
-                style={{ fontFamily: 'serif' }}
+                className="mt-6 w-full bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-rye font-bold py-3 rounded border-2 border-[#8d6e63] transition-colors uppercase"
               >
                 Cerrar
               </button>

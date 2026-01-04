@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/app/hooks/useAuth';
 import { motion } from 'framer-motion';
+import { WesternDecor } from '@/app/components/WesternDecor';
 
 export default function LoginPage() {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
@@ -61,8 +62,11 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen bg-[#1a0f0d] flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Fondo con textura */}
-      <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+      {/* Fondo con textura de madera */}
+      <div className="absolute inset-0 opacity-15 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+      
+      {/* Decoración western de fondo */}
+      <WesternDecor variant="full" className="opacity-25" />
       
       {/* Efecto de polvo */}
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/20"></div>
@@ -74,13 +78,13 @@ export default function LoginPage() {
         className="relative z-10 w-full max-w-md"
       >
         {/* Cartel tipo Wanted */}
-        <div className="bg-[#3e2723] border-[6px] border-[#ffb300] rounded-lg shadow-[0_0_30px_rgba(255,179,0,0.3)] p-8 relative">
+        <div className="bg-[#3e2723] border-[6px] border-[#ffb300] rounded-lg shadow-[0_0_30px_rgba(255,179,0,0.3)] p-8 relative wood-texture">
           {/* Efecto de papel arrugado */}
-          <div className="absolute inset-0 opacity-5 bg-[url('https://www.transparenttextures.com/patterns/paper.png')] rounded-lg"></div>
+          <div className="absolute inset-0 opacity-5 bg-[url('https://www.transparenttextures.com/patterns/paper.png')] rounded-lg paper-texture"></div>
           
           {/* Título */}
           <div className="text-center mb-8 relative z-10">
-            <h1 className="text-5xl font-bold text-[#ffb300] mb-2 drop-shadow-[3px_3px_0px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'serif', letterSpacing: '0.1em' }}>
+            <h1 className="text-5xl font-rye font-bold text-[#ffb300] mb-2 drop-shadow-[3px_3px_0px_rgba(0,0,0,0.8)]">
               WANTED
             </h1>
             <p className="text-[#d7ccc8] text-sm uppercase tracking-widest">El Saloon te espera</p>
@@ -90,23 +94,21 @@ export default function LoginPage() {
           <div className="flex gap-2 mb-6 relative z-10">
             <button
               onClick={() => setActiveTab('login')}
-              className={`flex-1 py-3 px-4 border-2 font-bold transition-all ${
+              className={`flex-1 py-3 px-4 border-2 font-rye font-bold transition-all ${
                 activeTab === 'login'
                   ? 'bg-[#ffb300] border-[#ff6f00] text-[#3e2723] shadow-lg'
                   : 'bg-[#1a0f0d] border-[#5d4037] text-[#d7ccc8] hover:border-[#8d6e63]'
               }`}
-              style={{ fontFamily: 'serif' }}
             >
               INICIAR SESIÓN
             </button>
             <button
               onClick={() => setActiveTab('register')}
-              className={`flex-1 py-3 px-4 border-2 font-bold transition-all ${
+              className={`flex-1 py-3 px-4 border-2 font-rye font-bold transition-all ${
                 activeTab === 'register'
                   ? 'bg-[#ffb300] border-[#ff6f00] text-[#3e2723] shadow-lg'
                   : 'bg-[#1a0f0d] border-[#5d4037] text-[#d7ccc8] hover:border-[#8d6e63]'
               }`}
-              style={{ fontFamily: 'serif' }}
             >
               REGISTRO
             </button>
@@ -123,7 +125,7 @@ export default function LoginPage() {
             >
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2" style={{ fontFamily: 'serif' }}>
+                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2 font-rye">
                     Email
                   </label>
                   <input
@@ -137,7 +139,7 @@ export default function LoginPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2" style={{ fontFamily: 'serif' }}>
+                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2 font-rye">
                     Contraseña
                   </label>
                   <input
@@ -153,8 +155,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-                  style={{ fontFamily: 'serif', fontSize: '1.1rem' }}
+                  className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-6 text-lg"
                 >
                   {isLoading ? 'ENTRANDO...' : 'ENTRAR AL SALOON'}
                 </button>
@@ -173,7 +174,7 @@ export default function LoginPage() {
             >
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2" style={{ fontFamily: 'serif' }}>
+                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2 font-rye">
                     Usuario
                   </label>
                   <input
@@ -187,7 +188,7 @@ export default function LoginPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2" style={{ fontFamily: 'serif' }}>
+                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2 font-rye">
                     Email
                   </label>
                   <input
@@ -201,7 +202,7 @@ export default function LoginPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2" style={{ fontFamily: 'serif' }}>
+                  <label className="block text-[#d7ccc8] text-sm uppercase tracking-wider mb-2 font-rye">
                     Contraseña
                   </label>
                   <input
@@ -217,8 +218,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-                  style={{ fontFamily: 'serif', fontSize: '1.1rem' }}
+                  className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed mt-6 text-lg"
                 >
                   {isLoading ? 'REGISTRANDO...' : 'UNIRSE AL SALOON'}
                 </button>

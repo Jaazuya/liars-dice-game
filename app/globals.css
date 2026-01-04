@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #1a0f0d;
+  --foreground: #d7ccc8;
+  --western-gold: #ffb300;
+  --western-orange: #ff6f00;
+  --western-brown: #3e2723;
+  --western-dark-brown: #1a0f0d;
+  --western-beige: #efebe9;
+  --western-rust: #8b6f47;
 }
 
 @theme inline {
@@ -10,17 +16,126 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-rye: var(--font-rye);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #1a0f0d;
+    --foreground: #d7ccc8;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Courier New', Courier, monospace, sans-serif;
+}
+
+/* Aplicar fuente Rye a títulos y elementos principales */
+h1, h2, h3, h4, h5, h6,
+.font-rye,
+button[class*="font-bold"],
+button[style*="fontFamily: 'serif'"],
+[style*="fontFamily: 'serif'"] {
+  font-family: var(--font-rye), serif;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+}
+
+/* Estilos para botones estilo madera/cartel */
+button.western-button,
+.western-button {
+  position: relative;
+  background: linear-gradient(135deg, #8b6f47 0%, #6d4c41 100%);
+  border: 3px solid #5d4037;
+  box-shadow: 
+    0 4px 0 #3e2723,
+    inset 0 2px 4px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+button.western-button:hover,
+.western-button:hover {
+  transform: translateY(1px);
+  box-shadow: 
+    0 3px 0 #3e2723,
+    inset 0 2px 4px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.3);
+}
+
+button.western-button:active,
+.western-button:active {
+  transform: translateY(2px);
+  box-shadow: 
+    0 2px 0 #3e2723,
+    inset 0 2px 4px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Efecto de textura de madera para botones dorados */
+button[class*="bg-[#ffb300]"],
+button[class*="bg-amber"] {
+  background: linear-gradient(135deg, #ffb300 0%, #ff6f00 100%);
+  border: 3px solid #ff6f00;
+  box-shadow: 
+    0 4px 0 #cc5500,
+    inset 0 2px 4px rgba(255, 255, 255, 0.2),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    0 0 20px rgba(255, 179, 0, 0.3);
+  position: relative;
+}
+
+button[class*="bg-[#ffb300]"]:hover,
+button[class*="bg-amber"]:hover {
+  transform: translateY(1px);
+  box-shadow: 
+    0 3px 0 #cc5500,
+    inset 0 2px 4px rgba(255, 255, 255, 0.2),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    0 0 25px rgba(255, 179, 0, 0.4);
+}
+
+button[class*="bg-[#ffb300]"]:active,
+button[class*="bg-amber"]:active {
+  transform: translateY(2px);
+  box-shadow: 
+    0 2px 0 #cc5500,
+    inset 0 2px 4px rgba(255, 255, 255, 0.2),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    0 0 15px rgba(255, 179, 0, 0.3);
+}
+
+/* Texto legible para inputs y textos pequeños */
+input, textarea, select,
+.text-readable {
+  font-family: 'Courier New', Courier, monospace, sans-serif;
+  font-size: 0.95rem;
+}
+
+/* Efecto de papel arrugado para fondos */
+.paper-texture {
+  background-image: 
+    url('data:image/svg+xml;utf8,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="%23efebe9" opacity="0.05"/></svg>'),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+}
+
+/* Efecto de madera para contenedores */
+.wood-texture {
+  background: 
+    linear-gradient(90deg, rgba(0,0,0,0.1) 0%, transparent 50%, rgba(0,0,0,0.1) 100%),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 10px,
+      rgba(0,0,0,0.05) 10px,
+      rgba(0,0,0,0.05) 11px
+    );
 }

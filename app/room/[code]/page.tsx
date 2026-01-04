@@ -12,6 +12,7 @@ import { GameSettings } from '@/app/components/GameSettings';
 import { GameNotification } from '@/app/components/GameNotification';
 import { RoundResult } from '@/app/components/RoundResult';
 import { GameOverScreen } from '@/app/components/GameOverScreen';
+import { WesternDecor } from '@/app/components/WesternDecor';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function RoomPage() {
@@ -125,6 +126,11 @@ export default function RoomPage() {
       
       {/* Fondo Común - Fijo */}
       <div className="fixed inset-0 -z-10 pointer-events-none opacity-40 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-repeat"></div>
+      
+      {/* Decoración Western (solo en esquinas cuando está jugando) */}
+      {gameState.status === 'playing' && (
+        <WesternDecor variant="corners" className="opacity-20 fixed inset-0 pointer-events-none" />
+      )}
 
 
           {/* --- FASE 1: LOBBY DE ESPERA --- */}
