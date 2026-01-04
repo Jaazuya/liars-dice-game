@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './hooks/useAuth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WesternDecor } from './components/WesternDecor';
+import { GameSelectorModal } from './components/GameSelectorModal';
 
 interface TopPlayer {
   username: string;
@@ -18,6 +19,7 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showTop5, setShowTop5] = useState(false);
+  const [showGameSelector, setShowGameSelector] = useState(false);
   const [topPlayers, setTopPlayers] = useState<TopPlayer[]>([]);
   const router = useRouter();
 
@@ -44,29 +46,85 @@ export default function Home() {
     }
   };
 
-  // Función CREAR SALA
-  const createRoom = async () => {
-    if (!profile?.username) {
-      alert('Error: No se encontró tu nombre de usuario.');
-      return;
-    }
+  // Función CREAR SALA (con game_type) - Versión blindada
+  const createRoom = async (gameType: 'DICE' | 'LOTERIA') => {
+    if (!user || !profile) return;
     setIsLoading(true);
-    const newRoomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const playerId = uuidv4();
+    setShowGameSelector(false);
 
     try {
-      await supabase.from('rooms').insert([{ code: newRoomCode }]);
-      await supabase.from('players').insert([{ 
-        id: playerId, 
-        room_code: newRoomCode, 
-        name: profile.username, 
-        is_host: true 
-      }]);
+      const playerId = uuidv4();
+
+      // 1. Crear la sala y pedir SOLO el código
+      const { data: roomData, error: roomError } = await supabase
+        .from('rooms')
+        .insert([
+          { 
+            host_id: user.id, 
+            game_type: gameType, 
+            status: 'WAITING' 
+          }
+        ])
+        .select('code') // <--- IMPORTANTE: Solo pedimos 'code'
+        .single();
+
+      // VALIDACIÓN ESTRICTA: Si falla, NO SEGUIR
+      if (roomError || !roomData) {
+        console.error("Error creando sala:", roomError);
+        throw new Error("Error al crear la sala en base de datos.");
+      }
+
+      const roomCode = roomData.code;
+
+      // 2. Si es Lotería, inicializar la tabla específica
+      if (gameType === 'LOTERIA') {
+        const { error: loteriaError } = await supabase
+          .from('loteria_rooms')
+          .insert([
+            { 
+              room_code: roomCode, // Usamos el código retornado
+              is_playing: false 
+            }
+          ]);
+
+        if (loteriaError) {
+          console.error("Error creando loteria_rooms:", loteriaError);
+          throw loteriaError;
+        }
+      }
+
+      // 3. Crear jugador (host)
+      const { error: playerError } = await supabase
+        .from('players')
+        .insert([{ 
+          id: playerId, 
+          room_code: roomCode,
+          name: profile.username, 
+          is_host: true 
+        }]);
+
+      if (playerError) {
+        console.error("Error creando jugador:", playerError);
+        throw playerError;
+      }
+
+      // Si llegamos aquí, TODO EXISTE en la BD.
       localStorage.setItem('playerId', playerId);
-      router.push(`/room/${newRoomCode}`);
-    } catch (error) {
-      console.error(error);
+
+      // 4. Redirigir SOLO AHORA
+      if (gameType === 'LOTERIA') {
+        router.push(`/loteria/room/${roomCode}`);
+      } else {
+        router.push(`/room/${roomCode}`);
+      }
+
+    } catch (error: any) {
+      console.error('Error CRÍTICO al crear sala:', error);
+      alert(`Error: ${error.message || 'No se pudo crear la sala'}`);
+      // Al caer aquí, NO se ejecuta el router.push
+    } finally {
       setIsLoading(false);
+      setShowGameSelector(false);
     }
   };
 
@@ -85,17 +143,20 @@ export default function Home() {
     const codeUpper = joinCode.toUpperCase();
 
     try {
-      const { data: roomData } = await supabase
+      // Obtener game_type de la sala
+      const { data: roomData, error: roomError } = await supabase
         .from('rooms')
-        .select('code, status')
+        .select('code, status, game_type')
         .eq('code', codeUpper)
         .single();
       
-      if (!roomData) {
+      if (roomError || !roomData) {
         alert('Esa sala no existe, compañero.');
         setIsLoading(false);
         return;
       }
+
+      const gameType = roomData.game_type || 'DICE';
 
       const playerData: any = {
         id: playerId,
@@ -105,7 +166,8 @@ export default function Home() {
         seat_index: null
       };
 
-      if (roomData.status === 'playing') {
+      // Solo agregar campos de dados si es juego de dados
+      if (gameType === 'DICE' && roomData.status === 'playing') {
         playerData.dice_values = [];
         playerData.money = 0;
         playerData.current_contribution = 0;
@@ -119,7 +181,13 @@ export default function Home() {
       if (error) throw error;
 
       localStorage.setItem('playerId', playerId);
-      router.push(`/room/${codeUpper}`);
+      
+      // Redirigir según el tipo de juego
+      if (gameType === 'LOTERIA') {
+        router.push(`/loteria/room/${codeUpper}`);
+      } else {
+        router.push(`/room/${codeUpper}`);
+      }
 
     } catch (error) {
       console.error(error);
@@ -227,7 +295,7 @@ export default function Home() {
 
           <div className="space-y-4">
             <button 
-              onClick={createRoom}
+              onClick={() => setShowGameSelector(true)}
               disabled={isLoading}
               className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase text-lg"
             >
@@ -313,6 +381,13 @@ export default function Home() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modal de Selección de Juego */}
+      <GameSelectorModal
+        isOpen={showGameSelector}
+        onClose={() => setShowGameSelector(false)}
+        onSelect={createRoom}
+      />
     </main>
   );
 }
