@@ -1,26 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from './lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
+import { useAuth } from './hooks/useAuth';
+import { motion, AnimatePresence } from 'framer-motion';
+
+interface TopPlayer {
+  username: string;
+  wins: number;
+}
 
 export default function Home() {
-  const [name, setName] = useState('');
-  const [joinCode, setJoinCode] = useState(''); // Estado para el código de invitación
+  const { user, profile, loading, signOut } = useAuth();
+  const [joinCode, setJoinCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showTop5, setShowTop5] = useState(false);
+  const [topPlayers, setTopPlayers] = useState<TopPlayer[]>([]);
   const router = useRouter();
+
+  // Cargar Top 5 cuando se abre el modal
+  useEffect(() => {
+    if (showTop5) {
+      fetchTop5();
+    }
+  }, [showTop5]);
+
+  const fetchTop5 = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('username, wins')
+        .order('wins', { ascending: false })
+        .limit(5);
+
+      if (error) throw error;
+      setTopPlayers(data || []);
+    } catch (error) {
+      console.error('Error fetching top players:', error);
+      setTopPlayers([]);
+    }
+  };
 
   // Función CREAR SALA
   const createRoom = async () => {
-    if (!name.trim()) return alert('¡Necesitas un nombre, forastero!');
+    if (!profile?.username) {
+      alert('Error: No se encontró tu nombre de usuario.');
+      return;
+    }
     setIsLoading(true);
     const newRoomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
     const playerId = uuidv4();
 
     try {
       await supabase.from('rooms').insert([{ code: newRoomCode }]);
-      await supabase.from('players').insert([{ id: playerId, room_code: newRoomCode, name: name, is_host: true }]);
+      await supabase.from('players').insert([{ 
+        id: playerId, 
+        room_code: newRoomCode, 
+        name: profile.username, 
+        is_host: true 
+      }]);
       localStorage.setItem('playerId', playerId);
       router.push(`/room/${newRoomCode}`);
     } catch (error) {
@@ -29,15 +69,21 @@ export default function Home() {
     }
   };
 
-  // Función UNIRSE A SALA (Nueva) - Permite late join como espectador
+  // Función UNIRSE A SALA
   const joinRoom = async () => {
-    if (!name.trim() || !joinCode.trim()) return alert('Pon tu nombre y el código de la sala.');
+    if (!profile?.username) {
+      alert('Error: No se encontró tu nombre de usuario.');
+      return;
+    }
+    if (!joinCode.trim()) {
+      alert('Pon el código de la sala.');
+      return;
+    }
     setIsLoading(true);
     const playerId = uuidv4();
     const codeUpper = joinCode.toUpperCase();
 
     try {
-      // 1. Verificar si la sala existe y obtener su estado
       const { data: roomData } = await supabase
         .from('rooms')
         .select('code, status')
@@ -50,20 +96,17 @@ export default function Home() {
         return;
       }
 
-      // 2. Insertar jugador en la sala
-      // Si el juego ya está en progreso, crear como espectador (sin dados, sin dinero inicial)
       const playerData: any = {
         id: playerId,
         room_code: codeUpper,
-        name: name,
+        name: profile.username,
         is_host: false,
-        seat_index: null // No tiene asiento si entra tarde
+        seat_index: null
       };
 
-      // Si el juego ya está en progreso, entrar como espectador
       if (roomData.status === 'playing') {
-        playerData.dice_values = []; // Array vacío = espectador
-        playerData.money = 0; // Sin dinero inicial
+        playerData.dice_values = [];
+        playerData.money = 0;
         playerData.current_contribution = 0;
         playerData.is_ready = false;
       }
@@ -84,48 +127,195 @@ export default function Home() {
     }
   };
 
-  return (
-    <main className="min-h-screen bg-stone-900 flex flex-col items-center justify-center p-4">
-      <div className="bg-stone-800 border-4 border-amber-700 p-8 rounded-lg max-w-md w-full text-center shadow-2xl">
-        <h1 className="text-4xl font-bold text-amber-500 mb-6 uppercase tracking-widest">Liar's Dice</h1>
-        
-        <input 
-          type="text" 
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Tu Nombre"
-          className="w-full bg-stone-900 border border-stone-600 text-stone-200 p-3 rounded mb-6 focus:border-amber-500 outline-none text-lg font-bold"
-        />
+  const handleSignOut = async () => {
+    await signOut();
+    router.push('/');
+  };
 
-        <div className="space-y-4">
-          <button 
-            onClick={createRoom}
-            disabled={isLoading}
-            className="w-full bg-amber-700 hover:bg-amber-600 text-stone-100 font-bold py-3 rounded transition border-2 border-amber-500"
+  // Pantalla de bienvenida si no hay usuario
+  if (!loading && !user) {
+    return (
+      <main className="min-h-screen bg-[#1a0f0d] flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5 }}
+          className="relative z-10 text-center"
+        >
+          <h1 className="text-6xl font-bold text-[#ffb300] mb-4 drop-shadow-[3px_3px_0px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'serif', letterSpacing: '0.1em' }}>
+            LIAR'S DICE
+          </h1>
+          <p className="text-[#d7ccc8] text-xl mb-8 uppercase tracking-widest">El Saloon te espera</p>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => router.push('/login')}
+            className="bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-6 px-12 rounded-lg border-4 border-[#ff6f00] shadow-[0_0_30px_rgba(255,179,0,0.5)] text-2xl uppercase tracking-wider transition-all"
+            style={{ fontFamily: 'serif' }}
           >
-            {isLoading ? 'Cargando...' : 'CREAR SALA NUEVA'}
+            ENTRAR AL SALOON
+          </motion.button>
+        </motion.div>
+      </main>
+    );
+  }
+
+  // Dashboard si hay usuario
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[#1a0f0d] flex items-center justify-center">
+        <div className="text-[#ffb300] text-xl">Cargando...</div>
+      </main>
+    );
+  }
+
+  const getInitial = (username: string) => {
+    return username.charAt(0).toUpperCase();
+  };
+
+  return (
+    <main className="min-h-screen bg-[#1a0f0d] flex flex-col p-4 relative overflow-hidden">
+      <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+      
+      {/* Header */}
+      <header className="relative z-10 w-full max-w-4xl mx-auto mb-8">
+        <div className="bg-[#3e2723] border-[4px] border-[#ffb300] rounded-lg p-4 shadow-lg flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            {/* Avatar */}
+            <div className="w-16 h-16 rounded-full bg-[#1a0f0d] border-2 border-[#ffb300] flex items-center justify-center text-2xl font-bold text-[#ffb300]">
+              {profile?.username ? getInitial(profile.username) : '?'}
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-[#ffb300]" style={{ fontFamily: 'serif' }}>
+                {profile?.username || 'Forastero'}
+              </h2>
+              <div className="flex items-center gap-2 text-[#d7ccc8]">
+                <span className="text-xl">👑</span>
+                <span className="font-bold text-lg">{profile?.wins || 0}</span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] px-4 py-2 rounded border border-[#8d6e63] transition-colors text-sm uppercase"
+            style={{ fontFamily: 'serif' }}
+          >
+            Salir
           </button>
-          
-          <div className="flex items-center gap-2 pt-4 border-t border-stone-700">
-            <input 
-              type="text" 
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value)}
-              placeholder="CÓDIGO"
-              maxLength={4}
-              className="w-24 bg-stone-900 border border-stone-600 text-stone-200 p-3 rounded focus:border-amber-500 outline-none uppercase text-center font-mono"
-            />
+        </div>
+      </header>
+
+      {/* Contenido Principal */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full">
+        {/* Botón Top 5 */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowTop5(true)}
+          className="mb-8 bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-4 px-8 rounded-lg border-4 border-[#ff6f00] shadow-lg text-xl uppercase tracking-wider transition-all"
+          style={{ fontFamily: 'serif' }}
+        >
+          🏆 TOP 5
+        </motion.button>
+
+        {/* Controles de Sala */}
+        <div className="bg-[#3e2723] border-[4px] border-[#5d4037] rounded-lg p-8 w-full shadow-2xl">
+          <h3 className="text-2xl font-bold text-[#ffb300] mb-6 text-center uppercase" style={{ fontFamily: 'serif' }}>
+            Crear o Unirse a Sala
+          </h3>
+
+          <div className="space-y-4">
             <button 
-              onClick={joinRoom}
+              onClick={createRoom}
               disabled={isLoading}
-              className="flex-1 bg-stone-700 hover:bg-stone-600 text-stone-300 font-bold py-3 rounded border-2 border-stone-500"
+              className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-bold py-4 rounded border-2 border-[#ff6f00] shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase text-lg"
+              style={{ fontFamily: 'serif' }}
             >
-              UNIRSE
+              {isLoading ? 'Cargando...' : 'CREAR SALA NUEVA'}
             </button>
+            
+            <div className="flex items-center gap-2 pt-4 border-t border-[#5d4037]">
+              <input 
+                type="text" 
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="CÓDIGO"
+                maxLength={4}
+                className="w-24 bg-[#1a0f0d] border-2 border-[#5d4037] text-[#d7ccc8] p-3 rounded focus:border-[#ffb300] focus:outline-none uppercase text-center font-mono text-lg"
+              />
+              <button 
+                onClick={joinRoom}
+                disabled={isLoading}
+                className="flex-1 bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-bold py-3 rounded border-2 border-[#8d6e63] transition-all uppercase"
+                style={{ fontFamily: 'serif' }}
+              >
+                UNIRSE
+              </button>
+            </div>
           </div>
         </div>
-
       </div>
+
+      {/* Modal Top 5 */}
+      <AnimatePresence>
+        {showTop5 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setShowTop5(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.8, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.8, y: 20 }}
+              className="bg-[#3e2723] border-[6px] border-[#ffb300] rounded-lg shadow-2xl max-w-md w-full p-8 relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-3xl font-bold text-[#ffb300] mb-6 text-center uppercase" style={{ fontFamily: 'serif' }}>
+                🏆 TOP 5 JUGADORES
+              </h2>
+              
+              <div className="space-y-3">
+                {topPlayers.length === 0 ? (
+                  <p className="text-[#d7ccc8] text-center">No hay jugadores aún...</p>
+                ) : (
+                  topPlayers.map((player, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="bg-[#1a0f0d] border-2 border-[#5d4037] rounded p-4 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">#{index + 1}</span>
+                        <span className="text-xl font-bold text-[#ffb300]" style={{ fontFamily: 'serif' }}>
+                          {player.username}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">👑</span>
+                        <span className="text-lg font-bold text-[#d7ccc8]">{player.wins}</span>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+
+              <button
+                onClick={() => setShowTop5(false)}
+                className="mt-6 w-full bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-bold py-3 rounded border-2 border-[#8d6e63] transition-colors uppercase"
+                style={{ fontFamily: 'serif' }}
+              >
+                Cerrar
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }
