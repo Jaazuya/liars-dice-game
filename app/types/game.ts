@@ -51,4 +51,6 @@ export interface GameState {
     notificationData: NotificationData | null; // Notificación global sincronizada
     gameOverData: GameOverData | null; // Datos de fin de juego
     allowCheats: boolean; // Si la sala permite trucos
+    randomTurns: boolean; // Si los turnos son aleatorios
+    turnSequence: string[] | null; // Orden de turnos cuando randomTurns está activo
 }

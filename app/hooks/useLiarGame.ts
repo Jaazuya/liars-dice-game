@@ -18,7 +18,9 @@ export const useLiarGame = (
         voteData: null,
         notificationData: null,
         gameOverData: null,
-        allowCheats: false
+        allowCheats: false,
+        randomTurns: false,
+        turnSequence: null
     });
 
     // Ref para evitar múltiples ejecuciones del auto-start
@@ -71,7 +73,9 @@ export const useLiarGame = (
                     },
                     notificationData: r.notification_data || null,
                     gameOverData: r.game_over_data || null,
-                    allowCheats: r.allow_cheats || false
+                    allowCheats: r.allow_cheats || false,
+                    randomTurns: r.settings_random_turns || false,
+                    turnSequence: r.turn_sequence || null
                 }));
             }
         };
@@ -106,6 +110,8 @@ export const useLiarGame = (
                     notificationData: r.notification_data !== undefined ? r.notification_data : prev.notificationData,
                     gameOverData: r.game_over_data !== undefined ? r.game_over_data : prev.gameOverData,
                     allowCheats: r.allow_cheats !== undefined ? r.allow_cheats : prev.allowCheats,
+                    randomTurns: r.settings_random_turns !== undefined ? r.settings_random_turns : prev.randomTurns,
+                    turnSequence: r.turn_sequence !== undefined ? r.turn_sequence : prev.turnSequence,
                     voteData: null // Ya no se usa, pero mantener para compatibilidad
                 }));
             })
@@ -132,6 +138,16 @@ export const useLiarGame = (
         }
     }, [players, myId, code]);
 
+    // --- FUNCIÓN AUXILIAR: Barajar array (Fisher-Yates) ---
+    const shuffleArray = <T,>(array: T[]): T[] => {
+        const shuffled = [...array];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+    };
+
     // --- INICIO DEL JUEGO (FASE 3) ---
     const startRound = async () => {
         // Obtener jugadores actualizados (solo los que están listos)
@@ -143,6 +159,15 @@ export const useLiarGame = (
             .order('created_at', { ascending: true });
 
         if (!currentPlayers || currentPlayers.length === 0) return;
+
+        // Obtener configuración de la sala
+        const { data: roomData } = await supabase
+            .from('rooms')
+            .select('settings_random_turns')
+            .eq('code', code)
+            .single();
+
+        const useRandomTurns = roomData?.settings_random_turns || false;
 
         // 🔒 SEGURIDAD: Calcular pot ANTES de iniciar
         const totalPot = currentPlayers.reduce((sum, p) => {
@@ -163,11 +188,21 @@ export const useLiarGame = (
             return;
         }
 
-        // 🎲 SHUFFLE DE ASIENTOS: Fisher-Yates Shuffle
-        const shuffledPlayers = [...currentPlayers];
-        for (let i = shuffledPlayers.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffledPlayers[i], shuffledPlayers[j]] = [shuffledPlayers[j], shuffledPlayers[i]];
+        let shuffledPlayers: typeof currentPlayers;
+        let turnSequence: string[] | null = null;
+
+        if (useRandomTurns) {
+            // TURNOS ALEATORIOS: El creador siempre inicia, resto barajado
+            const host = currentPlayers.find(p => p.is_host);
+            const others = currentPlayers.filter(p => !p.is_host);
+            const shuffledOthers = shuffleArray(others);
+            
+            shuffledPlayers = host ? [host, ...shuffledOthers] : currentPlayers;
+            turnSequence = shuffledPlayers.map(p => p.id);
+        } else {
+            // ORDEN FIJO: Barajar normalmente
+            shuffledPlayers = shuffleArray(currentPlayers);
+            turnSequence = null;
         }
 
         // Asignar seat_index a cada jugador (0, 1, 2, ...)
@@ -179,7 +214,7 @@ export const useLiarGame = (
         );
         await Promise.all(seatUpdates);
 
-        // Seleccionar jugador inicial (el primero en el orden aleatorio)
+        // Seleccionar jugador inicial (el primero en el orden)
         const starter = shuffledPlayers[0];
         
         // Barajear dados para TODOS (5 dados iniciales)
@@ -199,7 +234,8 @@ export const useLiarGame = (
                 status: 'playing', 
                 current_turn_player_id: starter.id, 
                 current_bet_quantity: 0, 
-                current_bet_face: 0
+                current_bet_face: 0,
+                turn_sequence: turnSequence
             })
             .eq('code', code);
     };
@@ -242,6 +278,18 @@ export const useLiarGame = (
         await supabase
             .from('rooms')
             .update({ allow_cheats: newValue })
+            .eq('code', code);
+    };
+
+    // --- FUNCIÓN: Toggle de Turnos Aleatorios (Solo Host) ---
+    const toggleRandomTurns = async () => {
+        const myPlayer = players.find(p => p.id === myId);
+        if (!myPlayer?.is_host) return;
+
+        const newValue = !gameState.randomTurns;
+        await supabase
+            .from('rooms')
+            .update({ settings_random_turns: newValue })
             .eq('code', code);
     };
 
@@ -432,6 +480,32 @@ export const useLiarGame = (
 
     // --- FUNCIÓN AUXILIAR: Obtener siguiente jugador activo ---
     const getNextActivePlayer = (currentPlayerId: string, playerList: Player[]): Player | null => {
+        // Si hay turn_sequence y randomTurns está activo, usar esa secuencia
+        if (gameState.randomTurns && gameState.turnSequence && gameState.turnSequence.length > 0) {
+            const currentIndex = gameState.turnSequence.findIndex(id => id === currentPlayerId);
+            if (currentIndex === -1) {
+                // Si el jugador actual no está en la secuencia, buscar el siguiente activo normalmente
+                return getNextActivePlayerFallback(currentPlayerId, playerList);
+            }
+
+            // Buscar siguiente jugador activo en la secuencia (cíclico)
+            for (let i = 1; i < gameState.turnSequence.length; i++) {
+                const nextIndex = (currentIndex + i) % gameState.turnSequence.length;
+                const nextPlayerId = gameState.turnSequence[nextIndex];
+                const nextPlayer = playerList.find(p => p.id === nextPlayerId);
+                if (nextPlayer && (nextPlayer.dice_values?.length || 0) > 0) {
+                    return nextPlayer;
+                }
+            }
+            return null;
+        }
+
+        // ORDEN FIJO: Usar lógica original
+        return getNextActivePlayerFallback(currentPlayerId, playerList);
+    };
+
+    // --- FUNCIÓN AUXILIAR: Obtener siguiente jugador activo (orden fijo) ---
+    const getNextActivePlayerFallback = (currentPlayerId: string, playerList: Player[]): Player | null => {
         const currentIndex = playerList.findIndex(p => p.id === currentPlayerId);
         if (currentIndex === -1) return null;
 
@@ -456,6 +530,15 @@ export const useLiarGame = (
             .order('created_at', { ascending: true });
 
         if (!currentPlayers) return;
+
+        // Obtener configuración de la sala
+        const { data: roomData } = await supabase
+            .from('rooms')
+            .select('settings_random_turns')
+            .eq('code', code)
+            .single();
+
+        const useRandomTurns = roomData?.settings_random_turns || false;
 
         const survivors = currentPlayers.filter(p => (p.dice_values?.length || 0) > 0);
         
@@ -483,6 +566,17 @@ export const useLiarGame = (
             nextTurnPlayer = getNextActivePlayer(loserId, currentPlayers) || survivors[0];
         }
 
+        let turnSequence: string[] | null = null;
+
+        if (useRandomTurns && nextTurnPlayer) {
+            // TURNOS ALEATORIOS: El perdedor inicia, resto barajado
+            const starter = nextTurnPlayer;
+            const others = survivors.filter(p => p.id !== starter.id);
+            const shuffledOthers = shuffleArray(others);
+            
+            turnSequence = [starter.id, ...shuffledOthers.map(p => p.id)];
+        }
+
         if (nextTurnPlayer) {
             await supabase
                 .from('rooms')
@@ -490,7 +584,8 @@ export const useLiarGame = (
                     current_bet_quantity: 0, 
                     current_bet_face: 0,
                     current_turn_player_id: nextTurnPlayer.id,
-                    notification_data: null // Limpiar notificación
+                    notification_data: null, // Limpiar notificación
+                    turn_sequence: turnSequence !== null ? turnSequence : undefined
                 })
                 .eq('code', code);
         }
@@ -800,6 +895,7 @@ export const useLiarGame = (
             abandonGame,
             resetRoom,
             toggleCheats,
+            toggleRandomTurns,
             useCheat
         }
     };

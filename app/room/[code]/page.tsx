@@ -146,6 +146,8 @@ export default function RoomPage() {
                 onAbandon={actions.abandonGame}
                 allowCheats={gameState.allowCheats}
                 onToggleCheats={actions.toggleCheats}
+                randomTurns={gameState.randomTurns}
+                onToggleRandomTurns={actions.toggleRandomTurns}
             />
           )}
 

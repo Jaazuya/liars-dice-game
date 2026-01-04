@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion } from 'framer-motion';
 import { WesternDecor } from './WesternDecor';
 
-export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, onKick, onAbandon, allowCheats, onToggleCheats }: any) => {
+export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, onKick, onAbandon, allowCheats, onToggleCheats, randomTurns, onToggleRandomTurns }: any) => {
     const [copied, setCopied] = useState(false);
 
     const copyCode = () => {
@@ -90,6 +90,36 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
                         ) : (
                             <div className="font-rye text-lg text-[#d7ccc8] mt-2 text-center">
                                 {allowCheats ? '🃏 Trucos: Activados' : '🃏 Trucos: Desactivados'}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* CONFIGURACIÓN DE TURNOS ALEATORIOS (Host Control) */}
+                <div className="bg-[#4e342e] p-4 rounded mb-6 border-2 border-[#6d4c41] shadow-lg">
+                    <div className="flex flex-col gap-2">
+                        <span className="text-[#d7ccc8] text-xs uppercase tracking-widest font-bold border-b border-[#8d6e63] pb-1">🔀 Turnos Aleatorios</span>
+                        
+                        {isHost ? (
+                            <div className="flex items-center justify-center gap-4 mt-2">
+                                <span className="font-rye text-lg text-[#d7ccc8]">Desactivado</span>
+                                <button 
+                                    onClick={onToggleRandomTurns}
+                                    className={`relative w-14 h-8 rounded-full transition-colors duration-200 ${
+                                        randomTurns ? 'bg-[#4caf50]' : 'bg-[#5d4037]'
+                                    }`}
+                                >
+                                    <span 
+                                        className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full transition-transform duration-200 ${
+                                            randomTurns ? 'translate-x-6' : 'translate-x-0'
+                                        }`}
+                                    />
+                                </button>
+                                <span className="font-rye text-lg text-[#d7ccc8]">Activado</span>
+                            </div>
+                        ) : (
+                            <div className="font-rye text-lg text-[#d7ccc8] mt-2 text-center">
+                                {randomTurns ? '🔀 Turnos Aleatorios: Activados' : '🔀 Turnos Aleatorios: Desactivados'}
                             </div>
                         )}
                     </div>
