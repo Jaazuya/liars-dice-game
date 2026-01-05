@@ -67,7 +67,7 @@ export const getCardById = (id: number) => {
 };
 
 // Función auxiliar para obtener todas las cartas disponibles (no sacadas)
-export const getAvailableCards = (drawnCards: number[]): typeof LOTERIA_CARDS => {
+export const getAvailableCards = (drawnCards: number[]): Array<(typeof LOTERIA_CARDS)[number]> => {
     return LOTERIA_CARDS.filter(card => !drawnCards.includes(card.id));
 };
 
