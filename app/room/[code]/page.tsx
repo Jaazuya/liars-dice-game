@@ -17,7 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function RoomPage() {
   const { code } = useParams();
-  const { players, myId, gameState, getDiceEmoji, actions } = useLiarGame(
+  const { players, myId, gameState, getDiceEmoji, actions, loading } = useLiarGame(
     code as string,
     (message, type) => setNotification({ message, type }),
     // onRoundResult ya no se usa, las notificaciones vienen de gameState.notificationData
@@ -35,6 +35,9 @@ export default function RoomPage() {
   const [notification, setNotification] = useState<{ message: string; type?: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
 
+  // Variable derivada necesaria para hooks subsiguientes
+  const myPlayer = players.find(p => p.id === myId);
+
   // Detectar si es móvil
   useEffect(() => {
     const checkMobile = () => {
@@ -45,9 +48,7 @@ export default function RoomPage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const myPlayer = players.find(p => p.id === myId);
-  
-  // Calcular total de dados en la mesa
+  // Calcular total de dados en la mesa (necesario para validaciones en render, no en hooks)
   const totalDiceOnTable = players.reduce((total, p) => {
     return total + (p.dice_values?.length || 0);
   }, 0);
@@ -93,10 +94,7 @@ export default function RoomPage() {
       // Primera vez que se asignan dados
       setPrevDiceValues(currentDice);
     }
-  }, [myPlayer?.dice_values, sounds]);
-  const isMyTurn = gameState.currentTurnId === myId;
-  const amIEliminated = (myPlayer?.dice_values?.length || 0) === 0;
-
+  }, [myPlayer?.dice_values, sounds]); // myPlayer se usa aquí
 
   // Funciones de zoom (incrementos de 5%)
   const handleZoomIn = () => {
@@ -120,6 +118,21 @@ export default function RoomPage() {
       gameContainerRef.current.parentElement.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     }
   };
+
+  const isMyTurn = gameState.currentTurnId === myId;
+  const amIEliminated = (myPlayer?.dice_values?.length || 0) === 0;
+
+  // --- PANTALLA DE CARGA (MOVIDA DESPUÉS DE TODOS LOS HOOKS) ---
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[#0d0d0d] flex items-center justify-center relative overflow-hidden">
+        <div className="fixed inset-0 opacity-40 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]"></div>
+        <div className="text-[#ffb300] text-2xl font-rye animate-pulse relative z-10">
+          Entrando al Saloon...
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#0d0d0d] font-serif flex flex-col relative">

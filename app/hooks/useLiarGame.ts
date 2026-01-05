@@ -8,7 +8,16 @@ export const useLiarGame = (
     onRoundResult?: (message: string, type?: 'success' | 'error' | 'info' | 'warning', onClose?: () => void) => void
 ) => {
     const [players, setPlayers] = useState<Player[]>([]);
-    const [myId, setMyId] = useState<string>('');
+    
+    // Inicialización Lazy síncrona para evitar race conditions
+    const [myId, setMyId] = useState<string>(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('playerId') || '';
+        }
+        return '';
+    });
+
+    const [loading, setLoading] = useState(true); // Estado de carga para evitar renders prematuros
     const [gameState, setGameState] = useState<GameState>({
         status: 'waiting',
         pot: 0,
@@ -32,51 +41,56 @@ export const useLiarGame = (
 
     // --- CARGA DE DATOS Y SUSCRIPCIONES ---
     useEffect(() => {
+        // Ya no necesitamos leer localStorage aquí porque lo hicimos en el useState lazy
         if (!code) return;
-        const storedId = localStorage.getItem('playerId');
-        if (storedId) setMyId(storedId);
 
         const fetchAll = async () => {
-            const { data: p } = await supabase
-                .from('players')
-                .select('*')
-                .eq('room_code', code);
-            
-            if (p) {
-                // Ordenar por seat_index si existe, sino por created_at
-                const sorted = [...p].sort((a, b) => {
-                    if (a.seat_index !== null && b.seat_index !== null) {
-                        return a.seat_index - b.seat_index;
-                    }
-                    if (a.seat_index !== null) return -1;
-                    if (b.seat_index !== null) return 1;
-                    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-                });
-                setPlayers(sorted);
-            }
+            try {
+                const { data: p } = await supabase
+                    .from('players')
+                    .select('*')
+                    .eq('room_code', code);
+                
+                if (p) {
+                    // Ordenar por seat_index si existe, sino por created_at
+                    const sorted = [...p].sort((a, b) => {
+                        if (a.seat_index !== null && b.seat_index !== null) {
+                            return a.seat_index - b.seat_index;
+                        }
+                        if (a.seat_index !== null) return -1;
+                        if (b.seat_index !== null) return 1;
+                        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                    });
+                    setPlayers(sorted);
+                }
 
-            const { data: r } = await supabase
-                .from('rooms')
-                .select('*')
-                .eq('code', code)
-                .single();
-            if (r) {
-                setGameState(prev => ({
-                    ...prev,
-                    status: r.status,
-                    pot: r.pot || 0,
-                    entryFee: r.entry_fee || 100,
-                    currentTurnId: r.current_turn_player_id,
-                    currentBet: { 
-                        quantity: r.current_bet_quantity || 0, 
-                        face: r.current_bet_face || 0 
-                    },
-                    notificationData: r.notification_data || null,
-                    gameOverData: r.game_over_data || null,
-                    allowCheats: r.allow_cheats || false,
-                    randomTurns: r.settings_random_turns || false,
-                    turnSequence: r.turn_sequence || null
-                }));
+                const { data: r } = await supabase
+                    .from('rooms')
+                    .select('*')
+                    .eq('code', code)
+                    .single();
+                if (r) {
+                    setGameState(prev => ({
+                        ...prev,
+                        status: r.status?.toLowerCase() || 'waiting', // Normalizar a minúsculas para evitar pantalla negra
+                        pot: r.pot || 0,
+                        entryFee: r.entry_fee || 100,
+                        currentTurnId: r.current_turn_player_id,
+                        currentBet: { 
+                            quantity: r.current_bet_quantity || 0, 
+                            face: r.current_bet_face || 0 
+                        },
+                        notificationData: r.notification_data || null,
+                        gameOverData: r.game_over_data || null,
+                        allowCheats: r.allow_cheats || false,
+                        randomTurns: r.settings_random_turns || false,
+                        turnSequence: r.turn_sequence || null
+                    }));
+                }
+            } catch (error) {
+                console.error("Error fetching game data:", error);
+            } finally {
+                setLoading(false);
             }
         };
 
@@ -100,7 +114,7 @@ export const useLiarGame = (
                 const r = payload.new as any;
                 setGameState(prev => ({
                     ...prev,
-                    status: r.status,
+                    status: r.status?.toLowerCase() || prev.status, // Normalizar a minúsculas
                     pot: r.pot,
                     entryFee: r.entry_fee,
                     currentTurnId: r.current_turn_player_id,
@@ -124,19 +138,25 @@ export const useLiarGame = (
 
     // --- DETECCIÓN DE EXPULSIÓN: Redirigir si el jugador fue expulsado ---
     useEffect(() => {
-        if (!myId || !code) return;
+        // Esperar a que termine la carga inicial y tengamos ID
+        if (loading || !myId || !code) return;
 
         // Verificar si el jugador actual todavía existe en la lista
         const myPlayerExists = players.some(p => p.id === myId);
         
+        // Solo redirigir si hay jugadores (significa que la lista cargó) pero yo no estoy
         if (!myPlayerExists && players.length > 0) {
+            console.error("🚨 DETECTADA EXPULSIÓN: ID local no encontrado en lista remota.", { myId, playersIds: players.map(p => p.id) });
             // El jugador fue expulsado, redirigir
             onNotification?.('Has sido expulsado del Saloon.', 'error');
+            // COMENTADO TEMPORALMENTE PARA DEBUG: Evitar redirección inmediata si es un falso positivo
+            /*
             setTimeout(() => {
                 window.location.href = '/';
             }, 2000);
+            */
         }
-    }, [players, myId, code]);
+    }, [players, myId, code, loading]);
 
     // --- FUNCIÓN AUXILIAR: Barajar array (Fisher-Yates) ---
     const shuffleArray = <T,>(array: T[]): T[] => {
@@ -883,6 +903,7 @@ export const useLiarGame = (
     return {
         players,
         myId,
+        loading, // Exponer estado de carga
         gameState,
         getDiceEmoji,
         actions: {
