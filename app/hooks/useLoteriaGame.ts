@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/app/lib/supabase'; 
-import { User } from '@supabase/supabase-js';
+import { User, RealtimeChannel } from '@supabase/supabase-js';
+import { checkPattern, PATTERN_POINTS, WinPattern, PATTERN_NAMES } from '../loteria/utils/validation';
 
 export interface LoteriaRoomState {
   room_code: string;
@@ -8,6 +9,8 @@ export interface LoteriaRoomState {
   current_card: number | null;
   drawn_cards: number[];
   last_update: string;
+  claimed_awards?: Record<string, boolean>;
+  last_game_event?: { message: string; type: 'success' | 'error'; timestamp: number } | null;
   rooms?: { host_id: string; status: string; } | null;
 }
 
@@ -16,12 +19,23 @@ interface LoteriaPlayer {
   user_id: string;
   board_cards: number[];
   marked_cards: number[];
+  score?: number;
+}
+
+export interface LoteriaLeaderboardEntry {
+  user_id: string;
+  name: string;
+  score: number;
 }
 
 export const useLoteriaGame = (roomCode: string, user: User | null) => {
   const [loteriaRoom, setLoteriaRoom] = useState<LoteriaRoomState | null>(null);
   const [myBoard, setMyBoard] = useState<LoteriaPlayer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastNotification, setLastNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [playersScores, setPlayersScores] = useState<Record<string, number>>({});
+  const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   // Generador de tablero simple (16 cartas únicas)
   const generateRandomBoard = () => {
@@ -49,8 +63,27 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
     };
     fetchRoom();
 
-    // 2. Obtener o Crear Tablero (Fix Loading Infinito)
+    // 2. Obtener o Crear Tablero y Puntuaciones iniciales
     const fetchOrCreateBoard = async () => {
+      // Fetch ALL scores + usernames first (leaderboard)
+      const { data: allScores } = await supabase
+        .from('loteria_players')
+        // profiles(username) funciona si la FK loteria_players.user_id -> profiles.id existe
+        .select('user_id, score, profiles(username)')
+        .eq('room_code', roomCode) as any;
+      
+      if (allScores) {
+        const scoresMap: Record<string, number> = {};
+        const namesMap: Record<string, string> = {};
+        allScores.forEach((p: any) => { 
+          scoresMap[p.user_id] = p.score || 0; 
+          const username = p?.profiles?.username;
+          if (username) namesMap[p.user_id] = username;
+        });
+        setPlayersScores(scoresMap);
+        setPlayerNames(prev => ({ ...prev, ...namesMap }));
+      }
+
       if (!user?.id) return;
       
       const { data } = await supabase
@@ -71,14 +104,15 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
             room_code: roomCode,
             user_id: user.id,
             board_cards: newBoardCards,
-            marked_cards: []
+            marked_cards: [],
+            score: 0
           })
           .select()
           .single();
         if (newData) setMyBoard(newData);
       }
     };
-    if (user?.id) fetchOrCreateBoard();
+    fetchOrCreateBoard();
 
     // 3. Suscripción Realtime
     console.log(`🔌 Suscribiendo a canal loteria_${roomCode}...`);
@@ -86,28 +120,58 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
       .channel(`loteria_${roomCode}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'loteria_rooms' }, // Quitamos filtro de servidor para evitar errores de sintaxis
+        { event: 'UPDATE', schema: 'public', table: 'loteria_rooms' },
         (payload) => {
-          // Filtrado en cliente
-          if ((payload.new as LoteriaRoomState).room_code !== roomCode) return;
+          const newRoom = payload.new as LoteriaRoomState;
+          if (newRoom.room_code !== roomCode) return;
           
-          console.log("🔔 UPDATE loteria_rooms:", payload.new);
+          console.log("🔔 UPDATE loteria_rooms:", newRoom);
+          
           setLoteriaRoom((prev) => {
+            // Detect Notification Change
+            if (newRoom.last_game_event && prev?.last_game_event?.timestamp !== newRoom.last_game_event.timestamp) {
+               console.log("🔔 Notification detected:", newRoom.last_game_event);
+               setLastNotification(newRoom.last_game_event);
+               
+               // Auto-close after 5s
+               setTimeout(() => setLastNotification(null), 5000);
+            }
             if (!prev) return null;
-            return { ...prev, ...payload.new as any };
+            return { ...prev, ...newRoom as any };
           });
         }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'loteria_players' }, // Quitamos filtro de servidor
+        { event: '*', schema: 'public', table: 'loteria_players' },
         async (payload) => {
-          // Filtrado en cliente
-          if ((payload.new as LoteriaPlayer).room_code !== roomCode) return;
+          const newPlayer = payload.new as LoteriaPlayer;
+          if (newPlayer.room_code !== roomCode) return;
 
-          if (user?.id && (payload.new as LoteriaPlayer)?.user_id === user.id) {
-            console.log("🔔 UPDATE myBoard:", payload.new);
-            setMyBoard(payload.new as LoteriaPlayer);
+          // Actualizar scores globales
+          setPlayersScores(prev => ({
+            ...prev,
+            [newPlayer.user_id]: newPlayer.score || 0
+          }));
+
+          // Si no tenemos nombre aún, intentar obtenerlo de profiles
+          if (!playerNames[newPlayer.user_id]) {
+            supabase
+              .from('profiles')
+              .select('username')
+              .eq('id', newPlayer.user_id)
+              .single()
+              .then(({ data }) => {
+                if (data?.username) {
+                  setPlayerNames(prev => ({ ...prev, [newPlayer.user_id]: data.username }));
+                }
+              });
+          }
+
+          // Actualizar mi tablero si soy yo
+          if (user?.id && newPlayer.user_id === user.id) {
+            console.log("🔔 UPDATE myBoard:", newPlayer);
+            setMyBoard(newPlayer);
           }
         }
       )
@@ -117,10 +181,13 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
            console.log("✅ Conectado a Realtime");
         }
       });
+    
+    channelRef.current = channel;
 
     return () => { 
       console.log("🔌 Desconectando canal...");
       supabase.removeChannel(channel); 
+      channelRef.current = null;
     };
   }, [roomCode, user?.id]);
 
@@ -129,28 +196,45 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
   const startGame = async () => {
     if (!loteriaRoom) return;
     
-    // 1. Actualización Optimista (Para que no tengas que recargar)
-    setLoteriaRoom(prev => prev ? { ...prev, is_playing: true, current_card: null, drawn_cards: [] } : null);
-
-    // 2. Actualización DB
-    const { error } = await supabase.from('loteria_rooms').update({
-      is_playing: true,
-      current_card: null,
-      drawn_cards: [],
-      last_update: new Date().toISOString()
-    }).eq('room_code', roomCode);
+    // 1. Actualización Optimista
+    setLoteriaRoom(prev => prev ? { 
+        ...prev, 
+        is_playing: true, 
+        current_card: null, 
+        drawn_cards: [],
+        claimed_awards: {},
+        last_game_event: null
+    } : null);
     
+    // Reset local board too (optimistic)
+    if (myBoard) {
+        setMyBoard({ ...myBoard, marked_cards: [], score: 0 });
+    }
+
+    // 2. Call RPC for Hard Reset
+    const { error } = await supabase.rpc('reset_loteria_room', { p_room_code: roomCode });
+
     if (error) {
-      console.error("❌ Error iniciando juego en BD:", error);
-      // Revertir optimismo si falla gravemente? 
-      // setLoteriaRoom(prev => prev ? { ...prev, is_playing: false } : null);
+        console.error("❌ RPC Reset failed, falling back to manual update:", JSON.stringify(error, null, 2));
+        
+        const updateRoom = supabase.from('loteria_rooms').update({
+          is_playing: true,
+          current_card: null,
+          drawn_cards: [],
+          claimed_awards: {}, 
+          last_game_event: { message: "¡JUEGO REINICIADO!", type: "success", timestamp: 0 },
+          last_update: new Date().toISOString()
+        }).eq('room_code', roomCode);
+
+        const updatePlayers = supabase.from('loteria_players')
+            .update({ marked_cards: [], score: 0 })
+            .eq('room_code', roomCode);
+        
+        await Promise.all([updateRoom, updatePlayers]);
     }
   };
 
-  // Esta función es la que usa TheDeck. 
-  // La hacemos "optimista" (no espera el await para liberar la UI rápido)
-  const updateGameCard = async (cardId: number, newDrawnCards: number[]) => {
-    // Importante: No usar await aquí para no bloquear el timer visual, pero sí loguear errores
+  const updateGameCard = async (cardId: number | null, newDrawnCards: number[]) => {
     supabase.from('loteria_rooms').update({
       current_card: cardId,
       drawn_cards: newDrawnCards,
@@ -169,18 +253,109 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
   const markCard = async (cardId: number) => {
     if (!user?.id || !myBoard || !loteriaRoom) return;
     
-    // Validar si la carta ya salió
-    const history = loteriaRoom.drawn_cards || [];
-    if (!history.includes(cardId)) return;
-
     if (!myBoard.board_cards.includes(cardId)) return;
     if (myBoard.marked_cards.includes(cardId)) return;
 
     const newMarkedCards = [...myBoard.marked_cards, cardId];
+    
+    // Optimistic Update
+    setMyBoard(prev => prev ? { ...prev, marked_cards: newMarkedCards } : null);
+
     await supabase.from('loteria_players').update({ marked_cards: newMarkedCards }).eq('room_code', roomCode).eq('user_id', user.id);
   };
 
+  const claimAward = async (pattern: WinPattern) => {
+    if (!loteriaRoom || !myBoard || !user) return;
+    
+    // 1. Optimistic Check: Exclusivity
+    if (loteriaRoom.claimed_awards?.[pattern]) {
+       setLastNotification({ message: "¡Ya fue reclamado!", type: 'error' });
+       setTimeout(() => setLastNotification(null), 3000);
+       return;
+    }
+
+    // 2. Validate
+    const isValid = checkPattern(pattern, myBoard.board_cards, loteriaRoom.drawn_cards);
+    const points = isValid ? PATTERN_POINTS[pattern] : -PATTERN_POINTS[pattern];
+    
+    // Get fresh score from DB or fallback to local + optimistic increment
+    const currentScore = myBoard.score || 0;
+    const newScore = currentScore + points;
+    
+    // Optimistic Score Update (Immediate)
+    setMyBoard(prev => prev ? { ...prev, score: newScore } : null);
+    setPlayersScores(prev => ({ ...prev, [user.id]: newScore }));
+
+    const newClaimedAwards = isValid ? { ...(loteriaRoom.claimed_awards || {}), [pattern]: true } : (loteriaRoom.claimed_awards || {});
+    
+    // 3. Prepare DB Notification
+    const playerName = playerNames[user.id] || user.email?.split('@')[0] || 'Jugador';
+    const message = isValid 
+      ? `✅ ${playerName} completó ${PATTERN_NAMES[pattern].toUpperCase()} (+${points} pts)`
+      : `❌ ${playerName} MINTIÓ sobre ${PATTERN_NAMES[pattern].toUpperCase()} (${points} pts)`;
+    const eventPayload = { message, type: isValid ? 'success' : 'error' as const, timestamp: Date.now() };
+
+    // 4. Update DB
+    
+    // Update Score ATOMICALLY via RPC
+    supabase.rpc('update_player_score', {
+      p_room_code: roomCode,
+      p_user_id: user.id,
+      p_points: points
+    }).then(({ data: serverScore, error }) => {
+       if(error) {
+         console.error("Error updating score via RPC:", error);
+       } else if (serverScore !== null) {
+         // Sync authoritative score
+         setMyBoard(prev => prev ? { ...prev, score: serverScore } : null);
+       }
+    });
+
+    // Update Room (Notification + Awards)
+    // Especial: Si es Llenas Valid, mandamos notificacion y esperamos antes de terminar juego
+    if (isValid && pattern === 'llenas') {
+        const roomUpdates: any = { 
+            last_game_event: eventPayload,
+            claimed_awards: newClaimedAwards
+        };
+        await supabase.from('loteria_rooms').update(roomUpdates).eq('room_code', roomCode);
+        
+        // Retrasar el fin del juego 5s para que se vea el toast
+        setTimeout(async () => {
+             // Usar RPC para asegurar permisos de escritura
+             const { error } = await supabase.rpc('finish_loteria_game', { p_room_code: roomCode });
+             if (error) console.error("Error ending game:", error);
+        }, 5000);
+
+    } else {
+        // Normal update
+        const roomUpdates: any = { last_game_event: eventPayload };
+        if (isValid) {
+          roomUpdates.claimed_awards = newClaimedAwards;
+        }
+        supabase.from('loteria_rooms')
+            .update(roomUpdates)
+            .eq('room_code', roomCode)
+            .then(({error}) => { if(error) console.error("Error update room notification", error); });
+    }
+  };
+
+  const returnToLobby = async () => {
+     const { error } = await supabase.rpc('return_to_lobby', { p_room_code: roomCode });
+     if (error) console.error("Error returning to lobby:", error);
+  };
+
+  const closeNotification = () => setLastNotification(null);
+
   const isHost = user?.id === loteriaRoom?.rooms?.host_id;
+
+  const leaderboard: LoteriaLeaderboardEntry[] = Object.entries(playersScores)
+    .map(([user_id, score]) => ({
+      user_id,
+      name: playerNames[user_id] || 'Jugador',
+      score: score || 0
+    }))
+    .sort((a, b) => b.score - a.score);
   
   return {
     loteriaRoom,
@@ -191,6 +366,12 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
     isHost,
     startGame,
     updateGameCard,
-    resetGame
+    resetGame,
+    returnToLobby, // Exposed
+    claimAward,
+    lastNotification,
+    closeNotification,
+    playersScores,
+    leaderboard
   };
 };

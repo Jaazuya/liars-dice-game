@@ -11,64 +11,61 @@ interface LoteriaBoardProps {
 
 export const LoteriaBoard = ({ boardCards, markedCards, onCardClick }: LoteriaBoardProps) => {
   return (
-    <div className="bg-[#3e2723] border-[4px] border-[#5d4037] rounded-lg p-6 shadow-2xl w-full">
-      <h2 className="text-2xl font-rye font-bold text-[#ffb300] mb-4 text-center uppercase">
-        Mi Tablero
-      </h2>
+    // Main Container (The Screen): locks the app to the screen size
+    <div className="fixed inset-0 w-full h-[100dvh] bg-black/90 flex items-center justify-center overflow-hidden z-0 lg:static lg:bg-transparent lg:h-full lg:block">
+      {/* 
+         NOTA: He añadido 'lg:static...' para que en escritorio respete el layout de columnas 
+         y no tape la baraja, pero en móvil sea full screen inmersivo como pediste.
+         Si prefieres full screen SIEMPRE, quita las clases 'lg:'.
+      */}
       
-      {/* Grid 4x4 con cartas en formato vertical (3:5) - Portrait */}
-      <div className="grid grid-cols-4 gap-3">
-        {boardCards.map((cardId, index) => {
-          const card = getCardById(cardId);
-          const isMarked = markedCards.includes(cardId);
-          
-          if (!card) return null;
+      {/* Grid Container (The Board Wrapper): defines shape */}
+      <div className="w-full max-w-md h-full max-h-[95vh] aspect-[3/5] p-2 mx-auto flex flex-col justify-center">
+        
+        {/* The Grid (The Parent): 16 equal cells */}
+        <div className="grid grid-cols-4 grid-rows-4 gap-2 w-full h-full bg-white p-2 rounded-lg border-[3px] border-black">
+          {boardCards.map((cardId, index) => {
+            const card = getCardById(cardId);
+            const isMarked = markedCards.includes(cardId);
+            
+            if (!card) return null;
 
-          return (
-            <motion.div
-              key={cardId}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: index * 0.05 }}
-              className="relative cursor-pointer group"
-              onClick={() => onCardClick(cardId)}
-              style={{ aspectRatio: '3/5' }}
-            >
-              <div className="relative w-full h-full rounded-lg overflow-hidden border-2 border-[#5d4037] shadow-lg hover:border-[#ffb300] transition-all bg-[#1a100e]">
+            return (
+              // Card Container (The Child div): fills the cell
+              <motion.div
+                key={cardId}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: index * 0.05 }}
+                className="relative w-full h-full overflow-hidden rounded cursor-pointer group bg-[#1a100e] border-2 border-black"
+                onClick={() => onCardClick(cardId)}
+              >
+                {/* The Image (The Grandchild img): stretches to fit exactly */}
                 <img
                   src={card.img}
                   alt={card.name}
-                  className="w-full h-full"
-                  style={{ 
-                    imageRendering: 'crisp-edges',
-                    objectFit: 'fill'
-                  }}
+                  className="absolute inset-0 w-full h-full object-fill"
+                  style={{ imageRendering: 'crisp-edges' }}
                 />
                 
-                {/* Frijol (marca) */}
+                {/* Marcador (Marker) */}
                 {isMarked && (
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="absolute inset-0 flex items-center justify-center bg-black/40"
-                  >
-                    <div className="w-12 h-12 rounded-full bg-[#8b4513] border-4 border-[#654321] shadow-lg flex items-center justify-center">
-                      <span className="text-2xl">🫘</span>
-                    </div>
-                  </motion.div>
+                  <motion.img
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                    src="/assets/loteria/img/marker.png"
+                    alt="Marcador"
+                    className="absolute z-10 inset-0 m-auto w-[85%] h-[85%] object-contain drop-shadow-md pointer-events-none"
+                  />
                 )}
 
                 {/* Overlay hover */}
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-              </div>
-              
-              {/* Nombre de la carta (opcional, pequeño) */}
-              <p className="text-[8px] text-[#d7ccc8] text-center mt-1 truncate font-rye">
-                {card.name}
-              </p>
-            </motion.div>
-          );
-        })}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-white/10 transition-colors z-20" />
+              </motion.div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

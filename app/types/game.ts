@@ -1,5 +1,6 @@
 export interface Player {
     id: string;
+    user_id?: string; // ID de autenticación (Supabase Auth)
     name: string;
     is_host: boolean;
     dice_values: number[] | null;

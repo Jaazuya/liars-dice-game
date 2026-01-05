@@ -16,6 +16,10 @@ export default function LoteriaLobby() {
 
   // Función CREAR MESA DE LOTERÍA
   const createLoteriaRoom = async () => {
+    if (!user) {
+      alert('Necesitas iniciar sesión para crear una mesa.');
+      return;
+    }
     if (!profile?.username) {
       alert('Error: No se encontró tu nombre de usuario.');
       return;
@@ -57,7 +61,8 @@ export default function LoteriaLobby() {
         id: playerId, 
         room_code: newRoomCode, 
         name: profile.username, 
-        is_host: true 
+        is_host: true,
+        user_id: user.id
       }]);
 
       localStorage.setItem('playerId', playerId);
@@ -71,6 +76,10 @@ export default function LoteriaLobby() {
 
   // Función UNIRSE A MESA
   const joinLoteriaRoom = async () => {
+    if (!user) {
+      alert('Necesitas iniciar sesión para unirte a una mesa.');
+      return;
+    }
     if (!profile?.username) {
       alert('Error: No se encontró tu nombre de usuario.');
       return;
@@ -110,7 +119,8 @@ export default function LoteriaLobby() {
           id: playerId,
           room_code: codeUpper,
           name: profile.username,
-          is_host: false
+          is_host: false,
+          user_id: user.id
         }]);
 
       if (playerError) throw playerError;

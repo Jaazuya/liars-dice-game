@@ -100,7 +100,8 @@ export default function Home() {
           id: playerId, 
           room_code: roomCode,
           name: profile.username, 
-          is_host: true 
+          is_host: true,
+          user_id: user.id
         }]);
 
       if (playerError) {
@@ -130,6 +131,10 @@ export default function Home() {
 
   // Función UNIRSE A SALA
   const joinRoom = async () => {
+    if (!user) {
+      alert('Necesitas iniciar sesión para unirte a una sala.');
+      return;
+    }
     if (!profile?.username) {
       alert('Error: No se encontró tu nombre de usuario.');
       return;
@@ -163,6 +168,7 @@ export default function Home() {
         room_code: codeUpper,
         name: profile.username,
         is_host: false,
+        user_id: user.id,
         seat_index: null
       };
 
