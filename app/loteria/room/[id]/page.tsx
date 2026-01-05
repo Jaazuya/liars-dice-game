@@ -49,7 +49,8 @@ export default function LoteriaRoomPage() {
     playersScores,
     closeNotification,
     returnToLobby,
-    leaderboard
+    leaderboard,
+    joinError
   } = useLoteriaGame(roomCode, user);
 
   // Calcular puntuación personal
@@ -116,6 +117,24 @@ export default function LoteriaRoomPage() {
     return (
       <main className="min-h-screen bg-[#1a0f0d] flex items-center justify-center">
         <div className="text-[#ffb300] text-xl font-rye">Cargando...</div>
+      </main>
+    );
+  }
+
+  // Bloqueo por capacidad (11º jugador) / error de asignación de tablero
+  if (joinError) {
+    return (
+      <main className="min-h-screen bg-[#1a0f0d] flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-[#3e2723] border-2 border-[#8b5a2b] rounded-lg p-6 max-w-lg w-full">
+          <h2 className="font-rye text-[#ffb300] text-2xl mb-3">No se pudo entrar</h2>
+          <p className="text-[#d7ccc8] mb-5">{joinError}</p>
+          <button
+            onClick={() => router.push('/loteria')}
+            className="bg-[#ffb300] hover:bg-[#ffca28] text-[#3e2723] font-rye px-6 py-3 rounded border-2 border-[#ff6f00] shadow-lg transition-all uppercase"
+          >
+            Volver
+          </button>
+        </div>
       </main>
     );
   }

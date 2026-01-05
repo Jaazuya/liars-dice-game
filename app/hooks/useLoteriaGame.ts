@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/app/lib/supabase'; 
 import { User, RealtimeChannel } from '@supabase/supabase-js';
 import { checkPattern, PATTERN_POINTS, WinPattern, PATTERN_NAMES } from '../loteria/utils/validation';
+import { NORMALIZED_LOTERIA_BOARDS } from '../loteria/utils/boards';
 
 export interface LoteriaRoomState {
   room_code: string;
@@ -35,17 +36,8 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
   const [lastNotification, setLastNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [playersScores, setPlayersScores] = useState<Record<string, number>>({});
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
+  const [joinError, setJoinError] = useState<string | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-
-  // Generador de tablero simple (16 cartas únicas)
-  const generateRandomBoard = () => {
-    const deck = Array.from({ length: 54 }, (_, i) => i + 1);
-    for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-    return deck.slice(0, 16);
-  };
 
   useEffect(() => {
     if (!roomCode) return;
@@ -71,6 +63,12 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
         // profiles(username) funciona si la FK loteria_players.user_id -> profiles.id existe
         .select('user_id, score, profiles(username)')
         .eq('room_code', roomCode) as any;
+
+      // Fetch boards in this room to know which "tabla" indices are already taken
+      const { data: existingBoards } = await supabase
+        .from('loteria_players')
+        .select('board_cards')
+        .eq('room_code', roomCode) as any;
       
       if (allScores) {
         const scoresMap: Record<string, number> = {};
@@ -85,6 +83,7 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
       }
 
       if (!user?.id) return;
+      setJoinError(null);
       
       const { data } = await supabase
         .from('loteria_players')
@@ -96,8 +95,52 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
       if (data) {
         setMyBoard(data);
       } else {
-        console.log("Creando tablero nuevo...");
-        const newBoardCards = generateRandomBoard();
+        // Capacidad máxima: 10 tableros oficiales
+        const currentPlayersCount = Array.isArray(allScores) ? allScores.length : 0;
+        if (currentPlayersCount >= 10) {
+          const msg = "La sala está llena (Tablas originales agotadas)";
+          setJoinError(msg);
+          setLastNotification({ message: msg, type: 'error' });
+          setTimeout(() => setLastNotification(null), 5000);
+          return;
+        }
+
+        // Determinar tableros ya asignados (por comparación con las tablas normalizadas)
+        const usedIndices = new Set<number>();
+        if (Array.isArray(existingBoards)) {
+          for (const row of existingBoards) {
+            const bc = row?.board_cards;
+            if (!Array.isArray(bc) || bc.length !== 16) continue;
+            const idx = NORMALIZED_LOTERIA_BOARDS.findIndex((b) => b.length === 16 && b.every((v, i) => v === bc[i]));
+            if (idx >= 0) usedIndices.add(idx);
+          }
+        }
+
+        const availableIndices = NORMALIZED_LOTERIA_BOARDS
+          .map((_, idx) => idx)
+          .filter((idx) => !usedIndices.has(idx));
+
+        if (availableIndices.length === 0) {
+          const msg = "La sala está llena (Tablas originales agotadas)";
+          setJoinError(msg);
+          setLastNotification({ message: msg, type: 'error' });
+          setTimeout(() => setLastNotification(null), 5000);
+          return;
+        }
+
+        // Selección aleatoria de tablero disponible
+        const pickedIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+        const newBoardCards = NORMALIZED_LOTERIA_BOARDS[pickedIndex];
+
+        if (!Array.isArray(newBoardCards) || newBoardCards.length !== 16) {
+          const msg = "Error: Tablas originales mal configuradas (normalización falló).";
+          setJoinError(msg);
+          setLastNotification({ message: msg, type: 'error' });
+          setTimeout(() => setLastNotification(null), 5000);
+          return;
+        }
+
+        console.log(`Asignando TABLA OFICIAL (random) #${pickedIndex + 1} a user_id=${user.id}`);
         const { data: newData } = await supabase
           .from('loteria_players')
           .insert({
@@ -372,6 +415,7 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
     lastNotification,
     closeNotification,
     playersScores,
-    leaderboard
+    leaderboard,
+    joinError
   };
 };

@@ -163,6 +163,20 @@ export default function Home() {
 
       const gameType = roomData.game_type || 'DICE';
 
+      // Capacidad: máximo 10 jugadores (según loteria_players)
+      if (gameType === 'LOTERIA') {
+        const { count: lpCount, error: lpErr } = await supabase
+          .from('loteria_players')
+          .select('*', { count: 'exact', head: true })
+          .eq('room_code', codeUpper);
+        if (lpErr) throw lpErr;
+        if ((lpCount || 0) >= 10) {
+          alert('La sala está llena (Tablas originales agotadas)');
+          setIsLoading(false);
+          return;
+        }
+      }
+
       const playerData: any = {
         id: playerId,
         room_code: codeUpper,
