@@ -74,7 +74,7 @@ export const LoteriaPayment = ({
   // Usamos el array 'players' para nombres, pero verificamos status con 'playersPaymentStatus'
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 text-center z-10 w-full min-h-screen bg-[#2d1b15] relative overflow-hidden">
+    <div className="flex-1 flex flex-col items-center justify-start sm:justify-center px-4 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+16px)] text-center z-10 w-full min-h-[100dvh] bg-[#2d1b15] relative overflow-y-auto">
       
       {/* Poster WANTED */}
       <motion.div 

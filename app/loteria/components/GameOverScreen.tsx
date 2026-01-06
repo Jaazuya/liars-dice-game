@@ -66,7 +66,7 @@ export const GameOverScreen = ({ leaderboard, gameOverData, payoutPending, onRes
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#1a0f0d]/95 flex flex-col items-center justify-start sm:justify-center overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-[#1a0f0d]/95 flex flex-col items-center justify-start sm:justify-center overflow-y-auto pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-[100dvh]">
       <motion.div 
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
