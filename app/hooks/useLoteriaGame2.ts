@@ -20,7 +20,8 @@ export interface LoteriaRoomState {
   game_over_data?: any; // WinnerData[] (backend)
 }
 
-interface LoteriaPlayer {
+// ✅ FIX: Agregado 'export' para que otros archivos puedan usar este tipo
+export interface LoteriaPlayer {
   room_code: string;
   user_id: string;
   board_cards: number[];
@@ -599,5 +600,3 @@ export const useLoteriaGame = (roomCode: string, user: User | null) => {
     updateEntryFee
   };
 };
-
-
