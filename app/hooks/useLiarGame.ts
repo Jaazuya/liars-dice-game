@@ -1,13 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/app/lib/supabase';
-import { Player, GameState, VoteData, NotificationData, GameOverData } from '@/app/types/game';
+import { Player, GameState, VoteData, NotificationData } from '@/app/types/game';
 
 export const useLiarGame = (
     code: string, 
     onNotification?: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void,
     onRoundResult?: (message: string, type?: 'success' | 'error' | 'info' | 'warning', onClose?: () => void) => void
 ) => {
+    const normalizedCode = (code || '').toUpperCase();
     const [players, setPlayers] = useState<Player[]>([]);
+    const [roomId, setRoomId] = useState<string | null>(null); // dice_rooms.id (UUID)
     
     // Inicialización Lazy síncrona para evitar race conditions
     const [myId, setMyId] = useState<string>(() => {
@@ -23,6 +25,7 @@ export const useLiarGame = (
         pot: 0,
         entryFee: 100,
         currentTurnId: null,
+        lastBetUserId: null,
         currentBet: { quantity: 0, face: 0 },
         voteData: null,
         notificationData: null,
@@ -32,60 +35,111 @@ export const useLiarGame = (
         turnSequence: null
     });
 
+    // Host derivado estrictamente por auth.user.id vs room.host_id
+    const [authUserId, setAuthUserId] = useState<string | null>(null);
+    const [roomHostId, setRoomHostId] = useState<string | null>(null);
+    const isHost = !!authUserId && !!roomHostId && authUserId === roomHostId;
+
     // Ref para evitar múltiples ejecuciones del auto-start
     const hasCheckedAllReady = useRef(false);
     // Ref para evitar múltiples timeouts de notificación
     const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const getDiceEmoji = (num: number) => ['?', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][num] || '?';
+    const notifyDbError = (prefix: string, error: any) => {
+        if (!error) return;
+        // PostgrestError a veces se imprime como {} en consola, pero trae propiedades útiles.
+        const msgParts = [
+            error?.message,
+            error?.details,
+            error?.hint,
+            error?.code ? `code=${error.code}` : null,
+            error?.status ? `status=${error.status}` : null
+        ].filter(Boolean);
+        const msg =
+            msgParts.length > 0
+                ? msgParts.join(' | ')
+                : (() => {
+                    try { return JSON.stringify(error); } catch { return String(error); }
+                })();
 
-    // --- CARGA DE DATOS Y SUSCRIPCIONES ---
+        console.error(prefix, { msg, raw: error });
+        onNotification?.(`${prefix}: ${msg}`, 'error');
+    };
+
+    // --- CARGA DE DATOS ---
     useEffect(() => {
-        // Ya no necesitamos leer localStorage aquí porque lo hicimos en el useState lazy
         if (!code) return;
+        setLoading(true);
+
+        // Cargar usuario autenticado
+        supabase.auth.getUser().then(({ data }) => {
+            setAuthUserId(data.user?.id || null);
+        });
 
         const fetchAll = async () => {
             try {
-                const { data: p } = await supabase
-                    .from('players')
+                // 1) Obtener la sala por `code` para recuperar su UUID real
+                const { data: r, error: roomErr } = await supabase
+                    .from('dice_rooms')
                     .select('*')
-                    .eq('room_code', code);
-                
-                if (p) {
-                    // Ordenar por seat_index si existe, sino por created_at
-                    const sorted = [...p].sort((a, b) => {
-                        if (a.seat_index !== null && b.seat_index !== null) {
-                            return a.seat_index - b.seat_index;
-                        }
-                        if (a.seat_index !== null) return -1;
-                        if (b.seat_index !== null) return 1;
-                        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-                    });
-                    setPlayers(sorted);
+                    .eq('code', normalizedCode)
+                    .single();
+
+                if (roomErr || !r) {
+                    console.error("Error fetching dice_room:", roomErr);
+                    setRoomId(null);
+                    setPlayers([]);
+                    setGameState(prev => ({ ...prev, status: 'not_found' }));
+                    return;
                 }
 
-                const { data: r } = await supabase
-                    .from('rooms')
+                setRoomId(r.id || null);
+
+                // host_id debe venir en dice_rooms
+                setRoomHostId(r.host_id || null);
+                setGameState(prev => ({
+                    ...prev,
+                    status: (() => {
+                        const raw = (r.game_phase ?? r.status ?? 'waiting');
+                        const s = String(raw).toLowerCase().trim();
+                        if (s === 'lobby') return 'waiting';
+                        if (s === 'waiting' || s === 'boarding' || s === 'playing' || s === 'finished' || s === 'not_found') return s as any;
+                        return 'waiting';
+                    })(),
+                    pot: r.pot || 0,
+                    entryFee: r.entry_fee || 100,
+                    currentTurnId: r.current_turn_player_id,
+                    lastBetUserId: r.last_bet_player_id ?? null,
+                    currentBet: { 
+                        quantity: r.current_bet_quantity || 0, 
+                        face: r.current_bet_face || 0 
+                    },
+                    notificationData: r.notification_data || null,
+                    gameOverData: r.game_over_data || null,
+                    allowCheats: r.allow_cheats || false,
+                    randomTurns: r.settings_random_turns || false,
+                    turnSequence: r.turn_sequence || null
+                }));
+
+                // 2) Cargar jugadores por UUID (dice_players.room_id)
+                const { data: p } = await supabase
+                    .from('dice_players')
                     .select('*')
-                    .eq('code', code)
-                    .single();
-                if (r) {
-                    setGameState(prev => ({
-                        ...prev,
-                        status: r.status?.toLowerCase() || 'waiting', // Normalizar a minúsculas para evitar pantalla negra
-                        pot: r.pot || 0,
-                        entryFee: r.entry_fee || 100,
-                        currentTurnId: r.current_turn_player_id,
-                        currentBet: { 
-                            quantity: r.current_bet_quantity || 0, 
-                            face: r.current_bet_face || 0 
-                        },
-                        notificationData: r.notification_data || null,
-                        gameOverData: r.game_over_data || null,
-                        allowCheats: r.allow_cheats || false,
-                        randomTurns: r.settings_random_turns || false,
-                        turnSequence: r.turn_sequence || null
-                    }));
+                    .eq('room_id', r.id);
+
+                if (p) {
+                    const sorted = [...p].sort((a, b) => {
+                        if (a.seat_index !== null && b.seat_index !== null) return a.seat_index - b.seat_index;
+                        if (a.seat_index !== null) return -1;
+                        if (b.seat_index !== null) return 1;
+                        // `created_at` no siempre existe en el esquema; fallback estable por id
+                        const at = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+                        const bt = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+                        if (at !== bt) return at - bt;
+                        return String(a.id).localeCompare(String(b.id));
+                    });
+                    setPlayers(sorted);
                 }
             } catch (error) {
                 console.error("Error fetching game data:", error);
@@ -95,46 +149,77 @@ export const useLiarGame = (
         };
 
         fetchAll();
+    }, [code, normalizedCode]);
 
-        const channel = supabase.channel(`room_${code}`)
-            .on('postgres_changes', { 
-                event: '*', 
-                schema: 'public', 
-                table: 'players', 
-                filter: `room_code=eq.${code}` 
-            }, () => {
-                fetchAll();
-            })
-            .on('postgres_changes', { 
-                event: 'UPDATE', 
-                schema: 'public', 
-                table: 'rooms', 
-                filter: `code=eq.${code}` 
-            }, (payload) => {
-                const r = payload.new as any;
-                setGameState(prev => ({
-                    ...prev,
-                    status: r.status?.toLowerCase() || prev.status, // Normalizar a minúsculas
-                    pot: r.pot,
-                    entryFee: r.entry_fee,
-                    currentTurnId: r.current_turn_player_id,
-                    currentBet: r.current_bet_quantity !== undefined 
-                        ? { quantity: r.current_bet_quantity, face: r.current_bet_face } 
-                        : prev.currentBet,
-                    notificationData: r.notification_data !== undefined ? r.notification_data : prev.notificationData,
-                    gameOverData: r.game_over_data !== undefined ? r.game_over_data : prev.gameOverData,
-                    allowCheats: r.allow_cheats !== undefined ? r.allow_cheats : prev.allowCheats,
-                    randomTurns: r.settings_random_turns !== undefined ? r.settings_random_turns : prev.randomTurns,
-                    turnSequence: r.turn_sequence !== undefined ? r.turn_sequence : prev.turnSequence,
-                    voteData: null // Ya no se usa, pero mantener para compatibilidad
-                }));
-            })
+    // --- SUSCRIPCIONES REALTIME (por UUID de sala) ---
+    useEffect(() => {
+        if (!roomId) return;
+
+        const fetchAll = async () => {
+            try {
+                const { data: r } = await supabase
+                    .from('dice_rooms')
+                    .select('*')
+                    .eq('id', roomId)
+                    .single();
+                if (r) {
+                    setRoomHostId(r.host_id || null);
+                    setGameState(prev => ({
+                        ...prev,
+                        status: (() => {
+                            const raw = (r.game_phase ?? r.status ?? prev.status);
+                            const s = String(raw).toLowerCase().trim();
+                            if (s === 'lobby') return 'waiting';
+                            if (s === 'waiting' || s === 'boarding' || s === 'playing' || s === 'finished' || s === 'not_found') return s as any;
+                            return prev.status;
+                        })(),
+                        pot: r.pot ?? prev.pot,
+                        entryFee: r.entry_fee ?? prev.entryFee,
+                        currentTurnId: r.current_turn_player_id ?? prev.currentTurnId,
+                        lastBetUserId: r.last_bet_player_id !== undefined ? r.last_bet_player_id : prev.lastBetUserId,
+                        currentBet: r.current_bet_quantity !== undefined
+                            ? { quantity: r.current_bet_quantity, face: r.current_bet_face }
+                            : prev.currentBet,
+                        notificationData: r.notification_data !== undefined ? r.notification_data : prev.notificationData,
+                        gameOverData: r.game_over_data !== undefined ? r.game_over_data : prev.gameOverData,
+                        allowCheats: r.allow_cheats !== undefined ? r.allow_cheats : prev.allowCheats,
+                        randomTurns: r.settings_random_turns !== undefined ? r.settings_random_turns : prev.randomTurns,
+                        turnSequence: r.turn_sequence !== undefined ? r.turn_sequence : prev.turnSequence,
+                        voteData: null
+                    }));
+                }
+
+                const { data: p } = await supabase
+                    .from('dice_players')
+                    .select('*')
+                    .eq('room_id', roomId);
+                if (p) setPlayers(p);
+            } catch (e) {
+                console.error("Error refetch realtime:", e);
+            }
+        };
+
+        fetchAll();
+
+        const channel = supabase.channel(`room_${roomId}`)
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'dice_players',
+                filter: `room_id=eq.${roomId}`
+            }, () => fetchAll())
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'dice_rooms',
+                filter: `id=eq.${roomId}`
+            }, () => fetchAll())
             .subscribe();
 
-        return () => { 
-            supabase.removeChannel(channel); 
+        return () => {
+            supabase.removeChannel(channel);
         };
-    }, [code]);
+    }, [roomId]);
 
     // --- DETECCIÓN DE EXPULSIÓN: Redirigir si el jugador fue expulsado ---
     useEffect(() => {
@@ -170,41 +255,60 @@ export const useLiarGame = (
 
     // --- INICIO DEL JUEGO (FASE 3) ---
     const startRound = async () => {
-        // Obtener jugadores actualizados (solo los que están listos)
-        const { data: currentPlayers } = await supabase
-            .from('players')
-            .select('*')
-            .eq('room_code', code)
-            .eq('is_ready', true)
-            .order('created_at', { ascending: true });
+        if (!roomId) return;
+        if (!isHost) return;
 
-        if (!currentPlayers || currentPlayers.length === 0) return;
+        onNotification?.('Iniciando partida...', 'info');
+
+        // Obtener jugadores actualizados (solo los que están listos)
+        const { data: currentPlayers, error: playersErr } = await supabase
+            .from('dice_players')
+            .select('*')
+            .eq('room_id', roomId)
+            .eq('is_ready', true)
+            // `created_at` no existe en todos los esquemas
+            ;
+
+        if (playersErr) {
+            notifyDbError('No se pudo leer jugadores listos', playersErr);
+            return;
+        }
+        if (!currentPlayers || currentPlayers.length === 0) {
+            onNotification?.('Aún no hay jugadores listos.', 'warning');
+            return;
+        }
 
         // Obtener configuración de la sala
-        const { data: roomData } = await supabase
-            .from('rooms')
+        const { data: roomData, error: roomCfgErr } = await supabase
+            .from('dice_rooms')
             .select('settings_random_turns')
-            .eq('code', code)
+            .eq('id', roomId)
             .single();
+        if (roomCfgErr) {
+            // Si la columna no existe o RLS bloquea, no detengas el juego: solo usa valor por defecto.
+            console.warn('No se pudo leer settings_random_turns, usando false.', roomCfgErr);
+        }
 
         const useRandomTurns = roomData?.settings_random_turns || false;
 
         // 🔒 SEGURIDAD: Calcular pot ANTES de iniciar
+        // current_contribution ya no existe (economía global). Pozo = entry_fee * jugadores listos.
         const totalPot = currentPlayers.reduce((sum, p) => {
-            return sum + (p.current_contribution || 0);
+            return sum + (p.is_ready ? (gameState.entryFee || 0) : 0);
         }, 0);
 
         // 🔒 ACTUALIZAR POT PRIMERO y verificar que se guardó correctamente
         const { error: potError, data: potData } = await supabase
-            .from('rooms')
+            .from('dice_rooms')
             .update({ pot: totalPot })
-            .eq('code', code)
+            .eq('id', roomId)
             .select()
             .single();
 
         // Si falla el UPDATE del pot, NO continuar
         if (potError || !potData || potData.pot !== totalPot) {
-            onNotification?.('Error al calcular el pozo. Intenta de nuevo.', 'error');
+            if (potError) notifyDbError('No se pudo actualizar el pozo', potError);
+            else onNotification?.('Error al calcular el pozo. Intenta de nuevo.', 'error');
             return;
         }
 
@@ -213,7 +317,7 @@ export const useLiarGame = (
 
         if (useRandomTurns) {
             // TURNOS ALEATORIOS: El creador siempre inicia, resto barajado
-            const host = currentPlayers.find(p => p.is_host);
+            const host = currentPlayers.find(p => (roomHostId && p.user_id === roomHostId)) || currentPlayers.find(p => p.is_host);
             const others = currentPlayers.filter(p => !p.is_host);
             const shuffledOthers = shuffleArray(others);
             
@@ -228,11 +332,16 @@ export const useLiarGame = (
         // Asignar seat_index a cada jugador (0, 1, 2, ...)
         const seatUpdates = shuffledPlayers.map((p, index) => 
             supabase
-                .from('players')
+                .from('dice_players')
                 .update({ seat_index: index })
                 .eq('id', p.id)
         );
-        await Promise.all(seatUpdates);
+        const seatResults = await Promise.all(seatUpdates);
+        const seatErr = seatResults.find(r => (r as any)?.error)?.error;
+        if (seatErr) {
+            notifyDbError('No se pudo asignar asientos', seatErr);
+            return;
+        }
 
         // Seleccionar jugador inicial (el primero en el orden)
         const starter = shuffledPlayers[0];
@@ -241,23 +350,61 @@ export const useLiarGame = (
         const diceUpdates = shuffledPlayers.map(p => {
             const newDice = Array.from({ length: 5 }, () => Math.floor(Math.random() * 6) + 1);
             return supabase
-                .from('players')
-                .update({ dice_values: newDice })
+                .from('dice_players')
+                // Resetear truco por partida si existe la columna
+                .update({ dice_values: newDice, has_used_cheat: false } as any)
                 .eq('id', p.id);
         });
-        await Promise.all(diceUpdates);
+        const diceResults = await Promise.all(diceUpdates);
+        const diceErr = diceResults.find(r => (r as any)?.error)?.error;
+        if (diceErr) {
+            // Fallback: si la columna no existe, intentar solo dice_values
+            if (diceErr.code === 'PGRST204' && `${diceErr.message || ''}`.includes('has_used_cheat')) {
+                const fallbackUpdates = shuffledPlayers.map(p => {
+                    const newDice = Array.from({ length: 5 }, () => Math.floor(Math.random() * 6) + 1);
+                    return supabase.from('dice_players').update({ dice_values: newDice } as any).eq('id', p.id);
+                });
+                const fbResults = await Promise.all(fallbackUpdates);
+                const fbErr = fbResults.find(r => (r as any)?.error)?.error;
+                if (fbErr) {
+                    notifyDbError('No se pudo barajear dados', fbErr);
+                    return;
+                }
+            } else {
+                notifyDbError('No se pudo barajear dados', diceErr);
+                return;
+            }
+        }
 
         // ✅ SOLO AHORA cambiar el estado a 'playing' (el pot ya está guardado)
-        await supabase
-            .from('rooms')
+        const { error: startErr } = await supabase
+            .from('dice_rooms')
             .update({ 
-                status: 'playing', 
+                game_phase: 'playing', 
                 current_turn_player_id: starter.id, 
                 current_bet_quantity: 0, 
                 current_bet_face: 0,
-                turn_sequence: turnSequence
+                turn_sequence: turnSequence,
+                last_bet_player_id: null
             })
-            .eq('code', code);
+            .eq('id', roomId);
+
+        if (startErr) {
+            notifyDbError('No se pudo iniciar la partida', startErr);
+            return;
+        }
+
+        // UI optimista final
+        setGameState(prev => ({
+            ...prev,
+            status: 'playing',
+            pot: totalPot,
+            currentTurnId: starter.id,
+            lastBetUserId: null,
+            currentBet: { quantity: 0, face: 0 },
+            turnSequence: turnSequence ?? prev.turnSequence
+        }));
+        onNotification?.('¡Partida iniciada!', 'success');
     };
 
     // --- AUTO-INICIO DEL JUEGO (Cuando todos están listos) ---
@@ -268,49 +415,79 @@ export const useLiarGame = (
         }
 
         const allReady = players.every(p => p.is_ready);
-        const myPlayer = players.find(p => p.id === myId);
         
         // Solo el host puede iniciar el juego
-        if (allReady && myPlayer?.is_host && !hasCheckedAllReady.current) {
+        if (allReady && isHost && !hasCheckedAllReady.current) {
             hasCheckedAllReady.current = true;
             startRound();
         } else if (!allReady) {
             hasCheckedAllReady.current = false;
         }
-    }, [players, gameState.status, myId, code]);
+    }, [players, gameState.status, myId, code, isHost]);
 
     // --- ACCIONES FASE 1: LOBBY ---
 
     const updateEntryFee = async (amount: number) => {
         if (amount < 0) return;
-        await supabase
-            .from('rooms')
+        if (!roomId) return;
+        const { error } = await supabase
+            .from('dice_rooms')
             .update({ entry_fee: amount })
-            .eq('code', code);
+            .eq('id', roomId);
+        if (error) {
+            notifyDbError('No se pudo actualizar la apuesta', error);
+            return;
+        }
+
+        // UI optimista (evita “no pasa nada” si Realtime tarda)
+        setGameState(prev => ({ ...prev, entryFee: amount }));
+        onNotification?.('Apuesta actualizada.', 'success');
     };
 
     // --- FUNCIÓN: Toggle de Trucos (Solo Host) ---
     const toggleCheats = async () => {
-        const myPlayer = players.find(p => p.id === myId);
-        if (!myPlayer?.is_host) return;
+        if (!isHost) return;
+        if (!roomId) return;
 
         const newValue = !gameState.allowCheats;
-        await supabase
-            .from('rooms')
+        const { error } = await supabase
+            .from('dice_rooms')
             .update({ allow_cheats: newValue })
-            .eq('code', code);
+            .eq('id', roomId);
+        if (error) {
+            if (error.code === 'PGRST204' && `${error.message || ''}`.includes('allow_cheats')) {
+                onNotification?.('Tu tabla dice_rooms no tiene la columna allow_cheats. Desactivando este botón.', 'warning');
+                return;
+            }
+            notifyDbError('No se pudo cambiar trucos', error);
+            return;
+        }
+
+        setGameState(prev => ({ ...prev, allowCheats: newValue }));
+        onNotification?.(newValue ? 'Trucos activados.' : 'Trucos desactivados.', 'success');
     };
 
     // --- FUNCIÓN: Toggle de Turnos Aleatorios (Solo Host) ---
     const toggleRandomTurns = async () => {
-        const myPlayer = players.find(p => p.id === myId);
-        if (!myPlayer?.is_host) return;
+        if (!isHost) return;
+        if (!roomId) return;
 
         const newValue = !gameState.randomTurns;
-        await supabase
-            .from('rooms')
+        const { error } = await supabase
+            .from('dice_rooms')
             .update({ settings_random_turns: newValue })
-            .eq('code', code);
+            .eq('id', roomId);
+        if (error) {
+            if (error.code === 'PGRST204' && `${error.message || ''}`.includes('settings_random_turns')) {
+                onNotification?.('Tu tabla dice_rooms no tiene la columna settings_random_turns. Desactivando este botón.', 'warning');
+                return;
+            }
+            notifyDbError('No se pudo cambiar turnos aleatorios', error);
+            return;
+        }
+
+        setGameState(prev => ({ ...prev, randomTurns: newValue }));
+        onNotification?.(newValue ? 'Turnos aleatorios activados.' : 'Turnos aleatorios desactivados.', 'success');
     };
 
     // --- FUNCIÓN: Usar Truco de Espionaje ---
@@ -324,7 +501,7 @@ export const useLiarGame = (
         const myPlayer = players.find(p => p.id === myId);
         if (!myPlayer) return null;
 
-        // Verificar si ya usó el truco
+        // Verificar si ya usó el truco (persistido en DB)
         if (myPlayer.has_used_cheat) {
             onNotification?.('Ya usaste tu truco en esta partida.', 'error');
             return null;
@@ -338,9 +515,9 @@ export const useLiarGame = (
 
         // Obtener todos los jugadores con dados
         const { data: allPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code);
+            .eq('room_id', roomId);
 
         if (!allPlayers) return null;
 
@@ -357,29 +534,54 @@ export const useLiarGame = (
             }
         });
 
-        // Marcar como usado inmediatamente
-        await supabase
-            .from('players')
-            .update({ has_used_cheat: true })
-            .eq('id', myId);
+        // Marcar como usado (1 vez por partida)
+        const { error: cheatErr } = await supabase
+            .from('dice_players')
+            .update({ has_used_cheat: true } as any)
+            .eq('id', myPlayer.id);
+        if (cheatErr) {
+            if (cheatErr.code === 'PGRST204' && `${cheatErr.message || ''}`.includes('has_used_cheat')) {
+                onNotification?.('Falta la columna dice_players.has_used_cheat en la BD.', 'error');
+            } else {
+                notifyDbError('No se pudo marcar truco', cheatErr);
+            }
+            // Aun así devolver el conteo (truco “free”) si prefieres, pero por ahora lo bloqueamos
+            return null;
+        }
+
+        // UI optimista
+        setPlayers(prev => prev.map(p => p.id === myPlayer.id ? ({ ...p, has_used_cheat: true } as any) : p));
 
         return totalCount;
     };
 
     const openTable = async () => {
+        if (!roomId) return;
+        if (!isHost) {
+            onNotification?.('Solo el Sheriff puede abrir la mesa.', 'error');
+            return;
+        }
         // Reiniciar estado de listos de todos
         await Promise.all(
             players.map(p => 
                 supabase
-                    .from('players')
+                    .from('dice_players')
                     .update({ is_ready: false })
                     .eq('id', p.id)
             )
         );
-        await supabase
-            .from('rooms')
-            .update({ status: 'boarding' })
-            .eq('code', code);
+        const { error } = await supabase
+            .from('dice_rooms')
+            .update({ game_phase: 'boarding' })
+            .eq('id', roomId);
+        if (error) {
+            notifyDbError('No se pudo abrir la mesa', error);
+            return;
+        }
+
+        // UI optimista
+        setGameState(prev => ({ ...prev, status: 'boarding' }));
+        onNotification?.('Mesa abierta. ¡A pagar la entrada!', 'success');
     };
 
     // --- FUNCIÓN: Abandonar Partida ---
@@ -388,7 +590,7 @@ export const useLiarGame = (
         
         // Eliminar jugador de la base de datos
         await supabase
-            .from('players')
+            .from('dice_players')
             .delete()
             .eq('id', myId);
         
@@ -398,14 +600,14 @@ export const useLiarGame = (
 
     // --- FUNCIÓN: Reiniciar Sala (Solo Host) ---
     const resetRoom = async () => {
-        const myPlayer = players.find(p => p.id === myId);
-        if (!myPlayer?.is_host) return;
+        if (!isHost) return;
+        if (!roomId) return;
         
         // Obtener todos los jugadores de la sala
         const { data: allPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code);
+            .eq('room_id', roomId);
         
         if (!allPlayers) return;
         
@@ -413,23 +615,22 @@ export const useLiarGame = (
         await Promise.all(
             allPlayers.map(p =>
                 supabase
-                    .from('players')
+                    .from('dice_players')
                     .update({
                         is_ready: false,
                         dice_values: null,
-                        current_contribution: 0,
                         seat_index: null, // Resetear asientos para el próximo shuffle
-                        has_used_cheat: false // Resetear trucos para la siguiente partida
-                    })
+                        // has_used_cheat ya no existe
+                    } as any)
                     .eq('id', p.id)
             )
         );
         
         // Reiniciar sala
         await supabase
-            .from('rooms')
+            .from('dice_rooms')
             .update({
-                status: 'waiting',
+                game_phase: 'waiting',
                 pot: 0,
                 current_bet_quantity: 0,
                 current_bet_face: 0,
@@ -438,51 +639,78 @@ export const useLiarGame = (
                 game_over_data: null,
                 kick_vote_data: null
             })
-            .eq('code', code);
+            .eq('id', roomId);
     };
 
     // --- ACCIONES FASE 2: BOARDING ---
 
     const payEntry = async (): Promise<boolean> => {
         const me = players.find(p => p.id === myId);
-        if (!me || me.money < gameState.entryFee) return false;
+        if (!me?.user_id) return false;
+        if (!roomId) return false;
 
-        // Descontar dinero y marcar ready
-        const { error } = await supabase
-            .from('players')
-            .update({ 
-                money: me.money - gameState.entryFee,
-                current_contribution: gameState.entryFee,
-                is_ready: true
-            })
+        // Cobro global (RPC universal)
+        let payError = (await supabase.rpc('pay_game_entry', {
+            user_id_param: me.user_id,
+            room_table_name: 'dice_rooms',
+            room_id_param: roomId,
+            amount: gameState.entryFee
+        })).error;
+        // fallback por compatibilidad si el RPC usa `code`
+        if (payError) {
+            payError = (await supabase.rpc('pay_game_entry', {
+                user_id_param: me.user_id,
+                room_table_name: 'dice_rooms',
+                room_id_param: code,
+                amount: gameState.entryFee
+            } as any)).error;
+        }
+
+        if (payError) {
+            console.error("Error pay_game_entry (dados):", payError);
+            onNotification?.('No se pudo pagar la entrada.', 'error');
+            return false;
+        }
+
+        // Marcar "listo" localmente para poder entrar al juego y contabilizar el pozo
+        const { error: readyError } = await supabase
+            .from('dice_players')
+            .update({ is_ready: true } as any)
             .eq('id', me.id);
 
-        return !error;
+        if (readyError) {
+            notifyDbError('No se pudo marcar como pagado', readyError);
+            return false;
+        }
+
+        // UI optimista
+        setPlayers(prev => prev.map(p => p.id === me.id ? ({ ...p, is_ready: true } as any) : p));
+        onNotification?.('Entrada pagada.', 'success');
+        return true;
     };
 
     // --- SISTEMA DE EXPULSIÓN (LEY MARCIAL DEL HOST) ---
     // Solo el Host puede expulsar, acción inmediata sin votación
 
     const kickPlayer = async (targetId: string) => {
-        const myPlayer = players.find(p => p.id === myId);
-        
         // Solo el Host puede expulsar
-        if (!myPlayer?.is_host) {
+        if (!isHost) {
             onNotification?.('Solo el Sheriff puede expulsar jugadores.', 'error');
             return;
         }
+        if (!roomId) return;
 
         // Obtener jugadores actualizados
         const { data: currentPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code);
+            .eq('room_id', roomId);
 
         if (!currentPlayers) return;
 
         // Expulsar directamente (acción inmediata)
         await supabase
-            .from('players')
+            .from('dice_players')
             .delete()
             .eq('id', targetId);
 
@@ -491,9 +719,9 @@ export const useLiarGame = (
             const nextPlayer = getNextActivePlayer(targetId, currentPlayers);
             if (nextPlayer) {
                 await supabase
-                    .from('rooms')
+                    .from('dice_rooms')
                     .update({ current_turn_player_id: nextPlayer.id })
-                    .eq('code', code);
+                    .eq('id', roomId);
             }
         }
     };
@@ -542,20 +770,21 @@ export const useLiarGame = (
 
     // --- FUNCIÓN: Manejar siguiente ronda (solo Host) ---
     const handleNextRound = async (loserId: string) => {
+        if (!roomId) return;
         // Obtener jugadores actualizados
         const { data: currentPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code)
-            .order('created_at', { ascending: true });
+            .eq('room_id', roomId)
+            ;
 
         if (!currentPlayers) return;
 
         // Obtener configuración de la sala
         const { data: roomData } = await supabase
-            .from('rooms')
+            .from('dice_rooms')
             .select('settings_random_turns')
-            .eq('code', code)
+            .eq('id', roomId)
             .single();
 
         const useRandomTurns = roomData?.settings_random_turns || false;
@@ -574,7 +803,7 @@ export const useLiarGame = (
                 Math.floor(Math.random() * 6) + 1
             );
             return supabase
-                .from('players')
+                .from('dice_players')
                 .update({ dice_values: newDice })
                 .eq('id', p.id);
         });
@@ -599,23 +828,21 @@ export const useLiarGame = (
 
         if (nextTurnPlayer) {
             await supabase
-                .from('rooms')
+            .from('dice_rooms')
                 .update({ 
                     current_bet_quantity: 0, 
                     current_bet_face: 0,
+                    last_bet_player_id: null,
                     current_turn_player_id: nextTurnPlayer.id,
                     notification_data: null, // Limpiar notificación
                     turn_sequence: turnSequence !== null ? turnSequence : undefined
                 })
-                .eq('code', code);
+            .eq('id', roomId);
         }
     };
 
     // --- CONTROL DE TIEMPO: El Host ejecuta handleNextRound después de 5 segundos ---
     useEffect(() => {
-        const myPlayer = players.find(p => p.id === myId);
-        const isHost = myPlayer?.is_host || false;
-
         // Limpiar timeout anterior si existe
         if (notificationTimeoutRef.current) {
             clearTimeout(notificationTimeoutRef.current);
@@ -640,12 +867,15 @@ export const useLiarGame = (
                 clearTimeout(notificationTimeoutRef.current);
             }
         };
-    }, [gameState.notificationData, players, myId, gameState.status, code]);
+    }, [gameState.notificationData, players, myId, gameState.status, code, isHost]);
 
     // --- LÓGICA DE JUEGO: APUESTAS Y RESOLUCIÓN ---
 
     const placeBet = async (qty: number, face: number) => {
         if (!gameState.currentTurnId) return;
+        if (!roomId) return;
+        const me = players.find(p => p.id === myId);
+        const myUserId = me?.user_id;
 
         // Validar apuesta: SIEMPRE debes aumentar la cantidad, sin importar la cara
         const currentBet = gameState.currentBet;
@@ -659,10 +889,10 @@ export const useLiarGame = (
 
         // Obtener jugadores actualizados
         const { data: currentPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code)
-            .order('created_at', { ascending: true });
+            .eq('room_id', roomId)
+            ;
 
         if (!currentPlayers) return;
 
@@ -670,38 +900,37 @@ export const useLiarGame = (
         if (!nextPlayer) return;
 
         await supabase
-            .from('rooms')
+            .from('dice_rooms')
             .update({ 
                 current_bet_quantity: qty, 
                 current_bet_face: face, 
-                current_turn_player_id: nextPlayer.id 
+                current_turn_player_id: nextPlayer.id,
+                last_bet_player_id: myUserId || myId
             })
-            .eq('code', code);
+            .eq('id', roomId);
+
+        // UI optimista del banner
+        setGameState(prev => ({
+            ...prev,
+            currentBet: { quantity: qty, face },
+            currentTurnId: nextPlayer.id,
+            lastBetUserId: myUserId || myId
+        }));
     };
 
     const resolveRound = async (action: 'LIAR' | 'EXACT') => {
         if (!gameState.currentBet.quantity || !gameState.currentBet.face) return;
         if (!gameState.currentTurnId) return;
+        if (!roomId) return;
 
         // Obtener jugadores actualizados
         const { data: currentPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code)
-            .order('created_at', { ascending: true });
+            .eq('room_id', roomId)
+            ;
 
         if (!currentPlayers) return;
-
-        // Encontrar al acusado (el jugador anterior que hizo la apuesta)
-        const myIndex = currentPlayers.findIndex(p => p.id === myId);
-        if (myIndex === -1) return;
-
-        let prevIndex = (myIndex - 1 + currentPlayers.length) % currentPlayers.length;
-        while ((currentPlayers[prevIndex].dice_values?.length || 0) === 0) {
-            prevIndex = (prevIndex - 1 + currentPlayers.length) % currentPlayers.length;
-            if (prevIndex === myIndex) return; // Evitar bucle infinito
-        }
-        const accused = currentPlayers[prevIndex];
 
         // CONTAR DADOS (SIN COMODINES - Los 1s son solo 1s)
         let totalCount = 0;
@@ -716,28 +945,36 @@ export const useLiarGame = (
             }
         });
 
-        // DETERMINAR PERDEDOR según la acción
+        // DETERMINAR PERDEDOR usando last_bet_player_id (auth.user.id) como fuente de verdad
         let loserId: string | null = null;
         let message = '';
         const diceEmoji = getDiceEmoji(gameState.currentBet.face);
 
+        const bettorKey = gameState.lastBetUserId;
+        const bettor =
+            (bettorKey ? currentPlayers.find(p => p.user_id === bettorKey) : null) ||
+            (bettorKey ? currentPlayers.find(p => p.id === bettorKey) : null) ||
+            null;
+
         if (action === 'LIAR') {
-            // Si hay >= cantidad apostada, el acusador (yo) pierde
-            // Si hay < cantidad apostada, el acusado pierde
+            // Si la apuesta era TRUE (hay >= qty), pierde el acusador (yo).
+            // Si la apuesta era LIE (hay < qty), pierde el que apostó (last_bet_player_id).
             if (totalCount >= gameState.currentBet.quantity) {
                 loserId = myId;
                 const myPlayer = currentPlayers.find(p => p.id === myId);
                 message = `❌ ${myPlayer?.name || 'Tú'} es un mentiroso. Había ${totalCount} ${diceEmoji} (apostaste ${gameState.currentBet.quantity}). Pierdes 1 dado.`;
             } else {
-                loserId = accused.id;
-                message = `✅ ${accused.name} es un mentiroso. Solo había ${totalCount} ${diceEmoji} (apostó ${gameState.currentBet.quantity}). ${accused.name} pierde 1 dado.`;
+                loserId = bettor?.id || null;
+                const bettorName = bettor?.name || 'El apostador';
+                message = `✅ ${bettorName} mintió. Solo había ${totalCount} ${diceEmoji} (apostó ${gameState.currentBet.quantity}). ${bettorName} pierde 1 dado.`;
             }
         } else if (action === 'EXACT') {
             // Si hay exactamente la cantidad, el acusado pierde (castigo por obvio)
             // Si NO hay exactamente esa cantidad, el acusador pierde
             if (totalCount === gameState.currentBet.quantity) {
-                loserId = accused.id;
-                message = `🎯 ¡EXACTO! Había exactamente ${totalCount} ${diceEmoji}. ${accused.name} pierde 1 dado.`;
+                loserId = bettor?.id || null;
+                const bettorName = bettor?.name || 'El apostador';
+                message = `🎯 ¡EXACTO! Había exactamente ${totalCount} ${diceEmoji}. ${bettorName} pierde 1 dado.`;
             } else {
                 loserId = myId;
                 const myPlayer = currentPlayers.find(p => p.id === myId);
@@ -756,23 +993,23 @@ export const useLiarGame = (
         if (newDiceCount === 0) {
             // Eliminar todos los dados (jugador eliminado)
             await supabase
-                .from('players')
+                .from('dice_players')
                 .update({ dice_values: [] })
                 .eq('id', loserId);
         } else {
             // Reducir en 1 dado
             await supabase
-                .from('players')
+                .from('dice_players')
                 .update({ dice_values: loser.dice_values.slice(0, -1) })
                 .eq('id', loserId);
         }
 
         // Obtener jugadores actualizados después de la pérdida
         const { data: updatedPlayers } = await supabase
-            .from('players')
+            .from('dice_players')
             .select('*')
-            .eq('room_code', code)
-            .order('created_at', { ascending: true });
+            .eq('room_id', roomId)
+            ;
 
         if (!updatedPlayers) return;
 
@@ -780,104 +1017,14 @@ export const useLiarGame = (
         const survivors = updatedPlayers.filter(p => (p.dice_values?.length || 0) > 0);
         
         if (survivors.length === 1) {
-            // ¡HAY GANADOR!
-            const winner = survivors[0];
-            const { data: roomData } = await supabase
-                .from('rooms')
-                .select('pot')
-                .eq('code', code)
-                .single();
-
-            const totalPot = roomData?.pot || 0;
-            
-            // Contar total de jugadores que participaron (todos los que están en la sala)
-            const totalParticipants = updatedPlayers.length;
-            
-            // Identificar al segundo lugar (el último en perder, que es el loserId)
-            const runnerUp = updatedPlayers.find(p => p.id === loserId);
-            
-            // Calcular reparto según reglas
-            let winnerAmount = totalPot;
-            let runnerUpAmount = 0;
-            
-            if (totalParticipants === 2) {
-                // 2 jugadores: Ganador se lleva 100%
-                winnerAmount = totalPot;
-                runnerUpAmount = 0;
-            } else if (totalParticipants >= 3 && runnerUp) {
-                // 3 o más jugadores: 80% ganador, 20% segundo lugar
-                winnerAmount = Math.round((totalPot * 0.8) / 50) * 50;
-                runnerUpAmount = Math.round((totalPot * 0.2) / 50) * 50;
-                
-                // Ajustar por redondeo (si sobra o falta, dárselo al ganador)
-                const totalDistributed = winnerAmount + runnerUpAmount;
-                if (totalDistributed !== totalPot) {
-                    winnerAmount += (totalPot - totalDistributed);
-                }
+            // ✅ Nuevo: el backend es el único que calcula ganadores y escribe dice_rooms.game_over_data
+            let error = (await supabase.rpc('distribute_dice_winnings', { room_id_param: roomId } as any)).error;
+            // fallback por compatibilidad si el RPC usa `code`
+            if (error) error = (await supabase.rpc('distribute_dice_winnings', { room_id_param: code } as any)).error;
+            if (error) {
+                console.error("Error distribute_dice_winnings:", error);
+                onNotification?.('Error al repartir ganancias.', 'error');
             }
-            
-            // Identificar perdedores (todos excepto ganador y runner-up)
-            const losers = updatedPlayers
-                .filter(p => p.id !== winner.id && p.id !== (runnerUp?.id || ''))
-                .map(p => p.id);
-            
-            // Actualizar dinero de ganador y runner-up
-            await supabase
-                .from('players')
-                .update({ 
-                    money: winner.money + winnerAmount,
-                    current_contribution: 0
-                })
-                .eq('id', winner.id);
-            
-            if (runnerUp && runnerUpAmount > 0) {
-                await supabase
-                    .from('players')
-                    .update({ 
-                        money: runnerUp.money + runnerUpAmount,
-                        current_contribution: 0
-                    })
-                    .eq('id', runnerUp.id);
-            }
-            
-            // Limpiar todos los dados y contribuciones
-            await Promise.all(
-                updatedPlayers.map(p => 
-                    supabase
-                        .from('players')
-                        .update({ 
-                            dice_values: null, 
-                            current_contribution: 0 
-                        })
-                        .eq('id', p.id)
-                )
-            );
-            
-            // Guardar datos de fin de juego
-            const gameOverData: GameOverData = {
-                winner: winner.id,
-                winnerName: winner.name,
-                runnerUp: runnerUp?.id || null,
-                runnerUpName: runnerUp?.name || null,
-                amounts: {
-                    winner: winnerAmount,
-                    runnerUp: runnerUpAmount
-                },
-                losers: losers,
-                totalPot: totalPot
-            };
-            
-            // Guardar game_over_data y mantener estado 'playing' (no volver a waiting)
-            await supabase
-                .from('rooms')
-                .update({ 
-                    game_over_data: gameOverData,
-                    current_bet_quantity: 0,
-                    current_bet_face: 0,
-                    current_turn_player_id: null,
-                    notification_data: null
-                })
-                .eq('code', code);
         } else {
             // Determinar tipo de notificación
             const notificationType = message.includes('❌') || message.includes('ERROR') ? 'error' : 
@@ -894,9 +1041,9 @@ export const useLiarGame = (
             };
 
             await supabase
-                .from('rooms')
-                .update({ notification_data: notificationData })
-                .eq('code', code);
+                .from('dice_rooms')
+                .update({ notification_data: notificationData, last_bet_player_id: null })
+                .eq('id', roomId);
         }
     };
 

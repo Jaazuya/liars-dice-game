@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { LoteriaLeaderboardEntry } from '@/app/hooks/useLoteriaGame';
+import { LoteriaLeaderboardEntry } from '@/app/hooks/useLoteriaGame2';
 
 interface PlayersModalProps {
   isOpen: boolean;

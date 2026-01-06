@@ -6,17 +6,22 @@ import { WinPattern, PATTERN_NAMES, PATTERN_ICONS, PATTERN_POINTS } from '../uti
 interface WinningPatternsProps {
   claimedAwards?: Record<string, boolean>;
   onClaim?: (pattern: WinPattern) => void;
+  enabledPatterns?: WinPattern[] | null;
 }
 
 const PATTERNS: WinPattern[] = ['linea', 'diagonal', 'cuadro', 'esquinas', 'centro', 'llenas'];
 
-export const WinningPatterns = ({ claimedAwards = {}, onClaim }: WinningPatternsProps) => {
+export const WinningPatterns = ({ claimedAwards = {}, onClaim, enabledPatterns = null }: WinningPatternsProps) => {
   
   const handleClaim = (pattern: WinPattern) => {
     if (onClaim && !claimedAwards[pattern]) {
       onClaim(pattern);
     }
   };
+
+  const patternsToShow = Array.isArray(enabledPatterns) && enabledPatterns.length > 0
+    ? PATTERNS.filter(p => enabledPatterns.includes(p))
+    : PATTERNS;
 
   return (
     <div className="bg-[#3e2723] border-[4px] border-[#5d4037] rounded-lg p-4 shadow-2xl w-full">
@@ -26,7 +31,7 @@ export const WinningPatterns = ({ claimedAwards = {}, onClaim }: WinningPatterns
 
       {/* Grid: 2 columnas en móvil, 1 columna en desktop */}
       <div className="grid grid-cols-2 lg:grid-cols-1 gap-2 sm:gap-3">
-        {PATTERNS.map((pattern, index) => {
+        {patternsToShow.map((pattern, index) => {
           const isClaimed = claimedAwards[pattern];
           
           return (

@@ -17,8 +17,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 export default function RoomPage() {
   const { code } = useParams();
+  const codeStr = (Array.isArray(code) ? code[0] : code || '').toString().toUpperCase();
   const { players, myId, gameState, getDiceEmoji, actions, loading } = useLiarGame(
-    code as string,
+    codeStr,
     (message, type) => setNotification({ message, type }),
     // onRoundResult ya no se usa, las notificaciones vienen de gameState.notificationData
     undefined
@@ -121,6 +122,11 @@ export default function RoomPage() {
 
   const isMyTurn = gameState.currentTurnId === myId;
   const amIEliminated = (myPlayer?.dice_values?.length || 0) === 0;
+  const lastBetName =
+    (gameState.lastBetUserId
+      ? players.find(p => p.user_id === gameState.lastBetUserId)?.name ||
+        players.find(p => p.id === gameState.lastBetUserId)?.name
+      : null) || null;
 
   // --- PANTALLA DE CARGA (MOVIDA DESPUÉS DE TODOS LOS HOOKS) ---
   if (loading) {
@@ -147,9 +153,26 @@ export default function RoomPage() {
 
 
           {/* --- FASE 1: LOBBY DE ESPERA --- */}
+          {gameState.status === 'not_found' && (
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="bg-[#3e2723] border-4 border-[#ffb300] rounded-lg p-6 text-center max-w-lg w-full">
+                <div className="text-[#ffb300] font-rye text-2xl mb-2">Sala no encontrada</div>
+                <div className="text-[#d7ccc8] text-sm mb-4">
+                  Código: <span className="font-mono font-bold">{codeStr || '—'}</span>
+                </div>
+                <button
+                  onClick={() => (window.location.href = '/')}
+                  className="w-full bg-[#ffb300] hover:bg-[#ff6f00] text-[#3e2723] font-rye font-bold py-3 rounded border-2 border-[#ff6f00] uppercase"
+                >
+                  Volver al Inicio
+                </button>
+              </div>
+            </div>
+          )}
+
           {gameState.status === 'waiting' && (
             <Lobby
-                code={code}
+                code={codeStr}
                 players={players}
                 isHost={myPlayer?.is_host}
                 entryFee={gameState.entryFee}
@@ -205,7 +228,9 @@ export default function RoomPage() {
                 pot={gameState.pot} 
                 myTurn={isMyTurn && !amIEliminated}
                 turnName={players.find(p => p.id === gameState.currentTurnId)?.name}
+                entryFee={gameState.entryFee}
             />
+
 
             <RivalsStrip 
                 players={players} 
@@ -217,7 +242,8 @@ export default function RoomPage() {
 
             <GameTable 
                 bet={gameState.currentBet} 
-                getEmoji={getDiceEmoji} 
+                getEmoji={getDiceEmoji}
+                lastBetName={lastBetName}
             />
 
             <div className="bg-[#2d1b15] border-t-2 sm:border-t-4 border-[#5d4037] p-2 sm:p-3 md:p-4 pb-4 sm:pb-6 md:pb-8 shrink-0 flex flex-col items-center shadow-[0_-10px_40px_rgba(0,0,0,0.5)] relative z-20">
@@ -277,16 +303,16 @@ export default function RoomPage() {
                                             });
                                         }
                                     }}
-                                    disabled={myPlayer?.has_used_cheat || false}
+                                    disabled={!!myPlayer?.has_used_cheat}
                                     whileHover={{ scale: myPlayer?.has_used_cheat ? 1 : 1.05 }}
                                     whileTap={{ scale: myPlayer?.has_used_cheat ? 1 : 0.95 }}
                                     className={`w-full bg-[#6a1b9a] text-[#e1bee7] font-rye text-sm sm:text-base md:text-lg py-2 sm:py-2.5 md:py-3 rounded-lg sm:rounded-xl border-b-[4px] sm:border-b-[6px] border-[#4a148c] active:border-b-0 active:translate-y-1 shadow-xl flex items-center justify-center gap-2 ${
                                         myPlayer?.has_used_cheat ? 'opacity-50 cursor-not-allowed grayscale' : ''
                                     }`}
-                                    title={myPlayer?.has_used_cheat ? 'Ya usaste tu truco' : 'Espiar dados en la mesa (solo una vez por partida)'}
+                                    title={myPlayer?.has_used_cheat ? 'Ya usaste tu truco' : 'Espiar dados en la mesa (solo 1 vez por partida)'}
                                 >
                                     <span>👁️</span>
-                                    <span>{myPlayer?.has_used_cheat ? 'TRUCO USADO' : 'ESPiar'}</span>
+                                    <span>{myPlayer?.has_used_cheat ? 'TRUCO USADO' : 'ESPIAR'}</span>
                                 </motion.button>
                             )}
                             
@@ -475,11 +501,9 @@ export default function RoomPage() {
 
       {/* PANTALLA DE FIN DE JUEGO */}
       <AnimatePresence>
-        {gameState.gameOverData && (
+        {gameState.gameOverData && gameState.status === 'finished' && (
           <GameOverScreen
             gameOverData={gameState.gameOverData}
-            players={players}
-            myId={myId}
             isHost={!!myPlayer?.is_host}
             onReset={actions.resetRoom}
           />

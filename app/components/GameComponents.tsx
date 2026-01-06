@@ -1,9 +1,56 @@
 'use client';
 import { Player } from "@/app/types/game";
 import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useState } from "react";
+import { supabase } from "@/app/lib/supabase";
 
 // --- 1. BARRA SUPERIOR ---
-export const TopBar = ({ me, pot, myTurn, turnName }: { me?: Player, pot: number, myTurn?: boolean, turnName?: string }) => (
+export const TopBar = ({ me, pot, myTurn, turnName, entryFee }: { me?: Player, pot: number, myTurn?: boolean, turnName?: string, entryFee?: number }) => (
+    <TopBarInner me={me} pot={pot} myTurn={myTurn} turnName={turnName} entryFee={entryFee} />
+);
+
+const TopBarInner = ({ me, pot, myTurn, turnName, entryFee }: { me?: Player, pot: number, myTurn?: boolean, turnName?: string, entryFee?: number }) => {
+    const [bank, setBank] = useState<number | null>(null);
+
+    useEffect(() => {
+        let mounted = true;
+        let channel: any = null;
+
+        const fetchBank = async (uid: string) => {
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('global_balance')
+                .eq('id', uid)
+                .single() as any;
+            if (mounted) setBank(profileData?.global_balance ?? null);
+        };
+
+        const setup = async () => {
+            const { data } = await supabase.auth.getUser();
+            const uid = data.user?.id;
+            if (!uid) return;
+
+            await fetchBank(uid);
+
+            channel = supabase
+                .channel(`profile_balance_topbar_${uid}`)
+                .on('postgres_changes', {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'profiles',
+                    filter: `id=eq.${uid}`
+                }, () => fetchBank(uid))
+                .subscribe();
+        };
+
+        setup();
+        return () => {
+            mounted = false;
+            if (channel) supabase.removeChannel(channel);
+        };
+    }, []);
+
+    return (
     <div className="w-full bg-[#3e2723] border-b-[4px] sm:border-b-[6px] border-[#251614] shadow-2xl z-20 shrink-0 relative flex flex-col items-center pt-2 pb-2 sm:pb-4">
         <div className="absolute inset-0 opacity-20 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#000_10px,#000_12px)] pointer-events-none"></div>
         <div className="w-full max-w-lg flex justify-between items-end px-2 sm:px-4 relative z-10">
@@ -45,17 +92,18 @@ export const TopBar = ({ me, pot, myTurn, turnName }: { me?: Player, pot: number
             {/* Dinero y Apuesta a la derecha */}
             <div className="flex flex-col items-end transform rotate-1 ml-auto">
                 <div className="flex flex-col items-end mb-2">
-                    <span className="text-[#d7ccc8] text-[8px] sm:text-[10px] uppercase tracking-[0.2em] font-sans mb-0.5 sm:mb-1 bg-black/40 px-1.5 sm:px-2 rounded">Dinero</span>
-                    <span className="font-rye text-2xl sm:text-3xl md:text-4xl text-[#4caf50] drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]">${me?.money || 0}</span>
+                    <span className="text-[#d7ccc8] text-[8px] sm:text-[10px] uppercase tracking-[0.2em] font-sans mb-0.5 sm:mb-1 bg-black/40 px-1.5 sm:px-2 rounded">Banco</span>
+                    <span className="font-rye text-2xl sm:text-3xl md:text-4xl text-[#4caf50] drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]">${bank?.toLocaleString?.() ?? '...'}</span>
                 </div>
                 <div className="flex flex-col items-end">
                     <span className="text-[#d7ccc8] text-[8px] sm:text-[10px] uppercase tracking-[0.2em] font-sans mb-0.5 sm:mb-1 bg-black/40 px-1.5 sm:px-2 rounded">Apuesta</span>
-                    <span className="font-rye text-xl sm:text-2xl md:text-3xl text-[#ffab91] drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]">${me?.current_contribution || 0}</span>
+                    <span className="font-rye text-xl sm:text-2xl md:text-3xl text-[#ffab91] drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]">${entryFee || 0}</span>
                 </div>
             </div>
         </div>
     </div>
-);
+    );
+};
 
 // --- 2. TIRA DE RIVALES (CON BOTÓN EXPULSAR) ---
 export const RivalsStrip = ({ players, myId, currentTurnId, amIHost, onKick }: { players: Player[], myId: string, currentTurnId: string | null, amIHost: boolean, onKick: (id: string) => void }) => (
@@ -127,7 +175,7 @@ export const RivalsStrip = ({ players, myId, currentTurnId, amIHost, onKick }: {
 );
 
 // --- 3. MESA CENTRAL ---
-export const GameTable = ({ bet, getEmoji }: { bet: { quantity: number, face: number }, getEmoji: (n: number) => string }) => (
+export const GameTable = ({ bet, getEmoji, lastBetName }: { bet: { quantity: number, face: number }, getEmoji: (n: number) => string, lastBetName?: string | null }) => (
     <div className="flex-1 flex items-center justify-center relative p-1.5 sm:p-2 md:p-4 w-full min-h-[120px] sm:min-h-[150px] md:min-h-[180px]">
         <div className="bg-[#1b5e20] border-[6px] sm:border-[8px] md:border-[10px] lg:border-[12px] border-[#3e2723] rounded-[20px] sm:rounded-[30px] md:rounded-[40px] w-full max-w-sm sm:max-w-md md:max-w-lg aspect-[2/1] sm:aspect-[2.5/1] md:aspect-[3/1] flex items-center justify-center shadow-[inset_0_0_60px_rgba(0,0,0,0.6)] relative overflow-hidden ring-2 sm:ring-4 ring-black/40">
             <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/felt.png')]"></div>
@@ -148,7 +196,7 @@ export const GameTable = ({ bet, getEmoji }: { bet: { quantity: number, face: nu
                                 transition={{ delay: 0.2 }}
                                 className="text-[#a5d6a7] text-xs uppercase mb-2 tracking-[0.3em] font-sans font-bold"
                             >
-                                La Apuesta es
+                                {lastBetName ? `${lastBetName} subió la apuesta a` : 'La Apuesta es'}
                             </motion.p>
                             <div className="flex items-center gap-4">
                                 <motion.span 

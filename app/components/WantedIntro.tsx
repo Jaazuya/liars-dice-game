@@ -1,7 +1,8 @@
 'use client';
 import { Player } from "@/app/types/game";
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from "@/app/lib/supabase";
 
 export const WantedIntro = ({ entryFee, players, myId, onPay, onKick, isHost, onAbandon }: { 
     entryFee: number, 
@@ -13,12 +14,49 @@ export const WantedIntro = ({ entryFee, players, myId, onPay, onKick, isHost, on
     onAbandon?: () => void
 }) => {
     const [isPaying, setIsPaying] = useState(false);
+    const [bank, setBank] = useState<number | null>(null);
+    const [bankLoading, setBankLoading] = useState(true);
     const me = players.find(p => p.id === myId);
     const imReady = me?.is_ready;
+
+    useEffect(() => {
+        let mounted = true;
+        const fetchBank = async () => {
+            setBankLoading(true);
+            const { data } = await supabase.auth.getUser();
+            const uid = data.user?.id;
+            if (!uid) { if (mounted) setBankLoading(false); return; }
+
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('global_balance')
+                .eq('id', uid)
+                .single() as any;
+
+            if (mounted) {
+                setBank(profileData?.global_balance ?? null);
+                setBankLoading(false);
+            }
+        };
+        fetchBank();
+        return () => { mounted = false; };
+    }, []);
 
     const handlePay = async () => {
         setIsPaying(true);
         await onPay();
+        // Refrescar banco (la RPC ya hizo el cobro)
+        const { data } = await supabase.auth.getUser();
+        const uid = data.user?.id;
+        if (uid) {
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('global_balance')
+                .eq('id', uid)
+                .single() as any;
+            setBank(profileData?.global_balance ?? bank);
+        }
+        setIsPaying(false);
     };
 
     // ¿Quiénes faltan?
@@ -47,6 +85,13 @@ export const WantedIntro = ({ entryFee, players, myId, onPay, onKick, isHost, on
 
                 <div className="font-rye text-7xl text-[#b71c1c] mb-8 drop-shadow-md decoration-4 underline decoration-[#3e2723]">
                     ${entryFee}
+                </div>
+
+                <div className="w-full mb-4 bg-[#3e2723]/10 border border-[#3e2723]/40 rounded p-2 text-[#3e2723]">
+                    <div className="text-[10px] uppercase tracking-widest font-bold">Banco</div>
+                    <div className="font-rye text-2xl">
+                        {bankLoading ? '...' : `$${(bank ?? 0).toLocaleString()}`}
+                    </div>
                 </div>
 
                 {/* LISTA DE ESTADO DE PAGO */}
@@ -85,12 +130,12 @@ export const WantedIntro = ({ entryFee, players, myId, onPay, onKick, isHost, on
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
                             onClick={handlePay}
-                            disabled={isPaying || me!.money < entryFee}
-                            whileHover={{ scale: me!.money >= entryFee ? 1.05 : 1 }}
-                            whileTap={{ scale: me!.money >= entryFee ? 0.95 : 1 }}
+                            disabled={isPaying || (bank !== null && bank < entryFee)}
+                            whileHover={{ scale: (bank !== null && bank >= entryFee) ? 1.05 : 1 }}
+                            whileTap={{ scale: (bank !== null && bank >= entryFee) ? 0.95 : 1 }}
                             className="w-full bg-[#3e2723] text-[#eecfa1] font-rye text-2xl py-4 border-4 border-double border-[#eecfa1] shadow-xl hover:bg-black transition-all uppercase tracking-widest disabled:opacity-50 disabled:grayscale"
                         >
-                            {me!.money < entryFee ? "SIN FONDOS" : (isPaying ? "PAGANDO..." : "PAGAR Y ENTRAR")}
+                            {(bank !== null && bank < entryFee) ? "SIN FONDOS" : (isPaying ? "PAGANDO..." : "PAGAR Y ENTRAR")}
                         </motion.button>
                     ) : (
                         <motion.div 

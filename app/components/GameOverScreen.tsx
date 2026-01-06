@@ -1,30 +1,70 @@
 'use client';
-import { GameOverData, Player } from '@/app/types/game';
+import { DiceGameOverEntry } from '@/app/types/game';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useState } from 'react';
+import { supabase } from '@/app/lib/supabase';
 
 interface GameOverScreenProps {
-    gameOverData: GameOverData;
-    players: Player[];
-    myId: string;
+    gameOverData: DiceGameOverEntry[];
     isHost: boolean;
     onReset: () => void;
 }
 
-export const GameOverScreen = ({ gameOverData, players, myId, isHost, onReset }: GameOverScreenProps) => {
+export const GameOverScreen = ({ gameOverData, isHost, onReset }: GameOverScreenProps) => {
     const [showCoins, setShowCoins] = useState(false);
-    const myPlayer = players.find(p => p.id === myId);
-    const winner = players.find(p => p.id === gameOverData.winner);
-    const runnerUp = gameOverData.runnerUp ? players.find(p => p.id === gameOverData.runnerUp) : null;
-    const losers = players.filter(p => gameOverData.losers.includes(p.id));
-    const amIWinner = myId === gameOverData.winner;
-    const amIRunnerUp = myId === gameOverData.runnerUp;
-    const amILoser = gameOverData.losers.includes(myId);
+    const [bank, setBank] = useState<number | null>(null);
+    const top = [...(gameOverData || [])].sort((a, b) => a.rank - b.rank).slice(0, 3);
+    const first = top.find(r => r.rank === 1);
+    const second = top.find(r => r.rank === 2);
+    const third = top.find(r => r.rank === 3);
 
     useEffect(() => {
         // Animación de monedas después de un breve delay
         const timer = setTimeout(() => setShowCoins(true), 500);
         return () => clearTimeout(timer);
+    }, []);
+
+    useEffect(() => {
+        let mounted = true;
+        const fetchBank = async (uid: string) => {
+            const { data } = await supabase.auth.getUser();
+            const userId = uid || data.user?.id;
+            if (!userId) return;
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('global_balance')
+                .eq('id', userId)
+                .single() as any;
+            if (mounted) setBank(profileData?.global_balance ?? null);
+        };
+
+        const setup = async () => {
+            const { data } = await supabase.auth.getUser();
+            const uid = data.user?.id;
+            if (!uid) return;
+
+            await fetchBank(uid);
+
+            // Realtime: refrescar banco cuando el backend actualice profiles (premios/redondeo)
+            const channel = supabase
+                .channel(`profile_balance_${uid}`)
+                .on('postgres_changes', {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'profiles',
+                    filter: `id=eq.${uid}`
+                }, () => {
+                    fetchBank(uid);
+                })
+                .subscribe();
+
+            return () => {
+                supabase.removeChannel(channel);
+            };
+        };
+
+        const cleanupPromise = setup();
+        return () => { mounted = false; };
     }, []);
 
     return (
@@ -33,18 +73,12 @@ export const GameOverScreen = ({ gameOverData, players, myId, isHost, onReset }:
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className={`absolute inset-0 ${
-                    amIWinner 
-                        ? 'bg-gradient-to-br from-[#ffd700] via-[#ffed4e] to-[#ffb300]' 
-                        : amILoser 
-                        ? 'bg-gradient-to-br from-[#8b0000] via-[#a00000] to-[#6b0000]'
-                        : 'bg-gradient-to-br from-[#4a5568] via-[#2d3748] to-[#1a202c]'
-                }`}
+                className="absolute inset-0 bg-gradient-to-br from-[#ffd700] via-[#ffed4e] to-[#ffb300]"
             />
             
             {/* Efecto de monedas para ganador */}
             <AnimatePresence>
-                {showCoins && amIWinner && (
+                {showCoins && (
                     <>
                         {[...Array(20)].map((_, i) => (
                             <motion.div
@@ -81,130 +115,66 @@ export const GameOverScreen = ({ gameOverData, players, myId, isHost, onReset }:
                 initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
                 animate={{ scale: 1, opacity: 1, rotate: 0 }}
                 transition={{ type: "spring", stiffness: 200, damping: 20 }}
-                className={`relative w-full max-w-4xl bg-[#1a0f0d] border-8 ${
-                    amIWinner 
-                        ? 'border-[#ffd700] shadow-[0_0_50px_rgba(255,215,0,0.8)]' 
-                        : amILoser 
-                        ? 'border-[#8b0000] shadow-[0_0_50px_rgba(139,0,0,0.8)]'
-                        : 'border-[#5d4037] shadow-[0_0_50px_rgba(0,0,0,0.8)]'
-                } rounded-lg p-8 md:p-12`}
+                className="relative w-full max-w-3xl bg-[#1a0f0d] border-8 border-[#ffd700] shadow-[0_0_50px_rgba(255,215,0,0.8)] rounded-lg p-6 md:p-10"
             >
                 {/* Textura de papel */}
                 <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/paper.png')] mix-blend-multiply pointer-events-none rounded-lg"></div>
 
                 {/* Título Principal */}
                 <div className="text-center mb-8 relative z-10">
-                    {amIWinner ? (
-                        <motion.h1
-                            initial={{ y: -50, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.3 }}
-                            className="font-rye text-6xl md:text-8xl text-[#ffd700] drop-shadow-[0_0_20px_rgba(255,215,0,0.8)] mb-4"
-                        >
-                            ¡RECOMPENSA COBRADA!
-                        </motion.h1>
-                    ) : amILoser ? (
-                        <motion.h1
-                            initial={{ y: -50, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.3 }}
-                            className="font-rye text-6xl md:text-8xl text-red-500 drop-shadow-[0_0_20px_rgba(255,0,0,0.8)] mb-4"
-                        >
-                            ELIMINADO
-                        </motion.h1>
-                    ) : (
-                        <motion.h1
-                            initial={{ y: -50, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.3 }}
-                            className="font-rye text-6xl md:text-8xl text-[#d7ccc8] drop-shadow-[0_0_20px_rgba(0,0,0,0.8)] mb-4"
-                        >
-                            FIN DE PARTIDA
-                        </motion.h1>
-                    )}
+                    <motion.h1
+                        initial={{ y: -50, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: 0.3 }}
+                        className="font-rye text-5xl md:text-7xl text-[#ffd700] drop-shadow-[0_0_20px_rgba(255,215,0,0.8)] mb-2"
+                    >
+                        RESULTADOS
+                    </motion.h1>
+                    <div className="text-[#d7ccc8] font-rye text-sm md:text-base">
+                        ¡Ganancias enviadas a tu cuenta global! <span className="text-[#ffb300]">(Redondeadas a tu favor)</span>
+                    </div>
+                    <div className="text-[#a1887f] font-mono text-xs mt-2">
+                        Banco: ${bank?.toLocaleString?.() ?? '...'}
+                    </div>
                 </div>
 
                 {/* Tabla de Resultados */}
                 <div className="bg-[#2d1b15] border-4 border-[#5d4037] rounded-lg p-6 md:p-8 mb-6 relative z-10">
-                    <h2 className="font-rye text-3xl md:text-4xl text-[#ffb300] mb-6 text-center border-b-2 border-[#5d4037] pb-3">
-                        RESULTADOS
-                    </h2>
-
-                    <div className="space-y-4">
-                        {/* Ganador */}
-                        <motion.div
-                            initial={{ x: -50, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ delay: 0.5 }}
-                            className="bg-gradient-to-r from-[#ffd700]/20 to-transparent border-l-4 border-[#ffd700] p-4 rounded"
-                        >
-                            <div className="flex justify-between items-center">
+                    <div className="space-y-3">
+                        {first && (
+                            <div className="bg-gradient-to-r from-[#ffd700]/20 to-transparent border-l-4 border-[#ffd700] p-4 rounded flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <span className="text-3xl">🏆</span>
+                                    <span className="text-3xl">🥇</span>
                                     <div>
-                                        <p className="font-rye text-xl md:text-2xl text-[#ffd700]">
-                                            {gameOverData.winnerName}
-                                        </p>
-                                        <p className="text-xs text-[#d7ccc8]">GANADOR</p>
+                                        <div className="font-rye text-xl md:text-2xl text-[#ffd700]">{first.username}</div>
+                                        <div className="text-xs text-[#d7ccc8]">1er Lugar</div>
                                     </div>
                                 </div>
-                                <p className="font-rye text-2xl md:text-3xl text-[#4caf50]">
-                                    +${gameOverData.amounts.winner.toLocaleString()}
-                                </p>
+                                <div className="font-rye text-2xl md:text-3xl text-[#4caf50]">+${first.payout.toLocaleString()}</div>
                             </div>
-                        </motion.div>
-
-                        {/* Segundo Lugar (si aplica) */}
-                        {runnerUp && gameOverData.amounts.runnerUp > 0 && (
-                            <motion.div
-                                initial={{ x: -50, opacity: 0 }}
-                                animate={{ x: 0, opacity: 1 }}
-                                transition={{ delay: 0.7 }}
-                                className="bg-gradient-to-r from-[#c0c0c0]/20 to-transparent border-l-4 border-[#c0c0c0] p-4 rounded"
-                            >
-                                <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-3xl">🥈</span>
-                                        <div>
-                                            <p className="font-rye text-xl md:text-2xl text-[#c0c0c0]">
-                                                {gameOverData.runnerUpName}
-                                            </p>
-                                            <p className="text-xs text-[#d7ccc8]">SEGUNDO LUGAR</p>
-                                        </div>
-                                    </div>
-                                    <p className="font-rye text-2xl md:text-3xl text-[#81c784]">
-                                        +${gameOverData.amounts.runnerUp.toLocaleString()}
-                                    </p>
-                                </div>
-                            </motion.div>
                         )}
-
-                        {/* Perdedores */}
-                        {losers.length > 0 && (
-                            <div className="mt-6 pt-4 border-t-2 border-[#5d4037]">
-                                <p className="font-rye text-lg text-[#a1887f] mb-3">ELIMINADOS:</p>
-                                <div className="space-y-2">
-                                    {losers.map((loser, idx) => {
-                                        const entryFee = loser.current_contribution || 0;
-                                        return (
-                                            <motion.div
-                                                key={loser.id}
-                                                initial={{ x: -50, opacity: 0 }}
-                                                animate={{ x: 0, opacity: 1 }}
-                                                transition={{ delay: 0.9 + idx * 0.1 }}
-                                                className="flex justify-between items-center bg-[#1a0f0d] p-3 rounded border border-[#5d4037]"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-xl">💀</span>
-                                                    <p className="font-rye text-lg text-[#d7ccc8]">{loser.name}</p>
-                                                </div>
-                                                <p className="font-rye text-lg text-red-400">
-                                                    -${entryFee.toLocaleString()}
-                                                </p>
-                                            </motion.div>
-                                        );
-                                    })}
+                        {second && (
+                            <div className="bg-gradient-to-r from-[#c0c0c0]/20 to-transparent border-l-4 border-[#c0c0c0] p-4 rounded flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-3xl">🥈</span>
+                                    <div>
+                                        <div className="font-rye text-xl md:text-2xl text-[#c0c0c0]">{second.username}</div>
+                                        <div className="text-xs text-[#d7ccc8]">2do Lugar</div>
+                                    </div>
                                 </div>
+                                <div className="font-rye text-2xl md:text-3xl text-[#81c784]">+${second.payout.toLocaleString()}</div>
+                            </div>
+                        )}
+                        {third && (
+                            <div className="bg-gradient-to-r from-[#cd7f32]/20 to-transparent border-l-4 border-[#cd7f32] p-4 rounded flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-3xl">🥉</span>
+                                    <div>
+                                        <div className="font-rye text-xl md:text-2xl text-[#cd7f32]">{third.username}</div>
+                                        <div className="text-xs text-[#d7ccc8]">3er Lugar</div>
+                                    </div>
+                                </div>
+                                <div className="font-rye text-2xl md:text-3xl text-[#81c784]">+${third.payout.toLocaleString()}</div>
                             </div>
                         )}
                     </div>

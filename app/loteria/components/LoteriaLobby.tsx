@@ -1,25 +1,101 @@
 'use client';
 
-import { Player } from "@/app/types/game";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from 'framer-motion';
 import { WesternDecor } from '@/app/components/WesternDecor';
+import { supabase } from "@/app/lib/supabase";
+import { LoteriaSettingsModal } from './LoteriaSettingsModal';
+import { WinPattern } from '../utils/validation';
+
+type Player = { user_id: string; name: string; is_host?: boolean };
 
 interface LoteriaLobbyProps {
   code: string;
   players: Player[];
+  myId?: string;
   isHost: boolean;
-  onStart: () => void;
+  onStart: () => void; // Legacy direct start
   onAbandon?: () => void;
+  onUpdateFee?: (fee: number) => void; // NUEVO
+  suggestedFee?: number;
+  enabledPatterns?: WinPattern[] | null;
+  gameSpeedMs?: number | null;
 }
 
-export const LoteriaLobby = ({ code, players, isHost, onStart, onAbandon }: LoteriaLobbyProps) => {
+export const LoteriaLobby = ({ code, players, myId, isHost, onStart, onAbandon, onUpdateFee, suggestedFee = 50, enabledPatterns = null, gameSpeedMs = null }: LoteriaLobbyProps) => {
   const [copied, setCopied] = useState(false);
+  const [feeInput, setFeeInput] = useState(suggestedFee); // Apuesta sugerida
+  const [bank, setBank] = useState<number | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  // Apuesta personal (cada quien decide) - se guarda para usarse en la pantalla de Pago
+  const storageKey = myId ? `loteria_bet_${myId}` : null;
+  const [myBet, setMyBet] = useState<number>(() => {
+    if (typeof window === 'undefined') return suggestedFee || 50;
+    try {
+      const raw = storageKey ? window.localStorage.getItem(storageKey) : null;
+      const n = raw ? parseInt(raw, 10) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : (suggestedFee || 50);
+    } catch {
+      return suggestedFee || 50;
+    }
+  });
 
   const copyCode = () => {
     navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchBank = async () => {
+      const { data } = await supabase.auth.getUser();
+      const uid = data.user?.id;
+      if (!uid) return;
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('global_balance')
+        .eq('id', uid)
+        .single() as any;
+
+      if (mounted) setBank(profileData?.global_balance ?? null);
+    };
+    fetchBank();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      window.localStorage.setItem(storageKey, String(myBet));
+    } catch {}
+  }, [storageKey, myBet]);
+
+  const handleOpenTable = () => {
+    if (onUpdateFee) {
+        // Actualiza sugerencia y abre la fase de pago (entry_fee > 0)
+        onUpdateFee(Math.max(10, feeInput));
+    } else {
+        onStart();
+    }
+  };
+
+  const handleSaveSettings = async (value: { speedMs: number; enabledPatterns: WinPattern[] }) => {
+    if (!isHost) return;
+    setSettingsError(null);
+    // Guardar en BD (si las columnas existen). Si no existen, mostramos el error para que agregues columnas.
+    const { error } = await supabase
+      .from('loteria_rooms')
+      .update({ game_speed_ms: value.speedMs, enabled_patterns: value.enabledPatterns } as any)
+      .eq('room_code', code);
+    if (error) {
+      setSettingsError(error.message || 'No se pudieron guardar ajustes.');
+      return;
+    }
+    setShowSettings(false);
   };
 
   return (
@@ -48,6 +124,11 @@ export const LoteriaLobby = ({ code, players, isHost, onStart, onAbandon }: Lote
         <h1 className="font-rye text-5xl md:text-6xl text-[#ffb300] mb-2 drop-shadow-[4px_4px_0px_#000]">LOTERÍA</h1>
         <p className="text-[#a1887f] uppercase tracking-[0.4em] text-xs mb-8 font-sans border-b border-[#5d4037] pb-4">Sala de Espera</p>
 
+        <div className="mb-6 bg-[#2d1b15] border border-[#5d4037] rounded p-3 shadow-inner">
+          <div className="text-[#a1887f] text-[10px] uppercase tracking-widest">Banco</div>
+          <div className="font-rye text-[#ffb300] text-2xl">Banco: ${bank?.toLocaleString?.() ?? '...'}</div>
+        </div>
+
         {/* CÓDIGO DE SALA */}
         <div 
           onClick={copyCode}
@@ -67,8 +148,8 @@ export const LoteriaLobby = ({ code, players, isHost, onStart, onAbandon }: Lote
           </div>
           
           <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2 bg-[#2d1b15]/50 p-2 rounded border border-[#5d4037]">
-            {players.map((p: Player) => (
-              <div key={p.id} className="flex justify-between items-center bg-[#2d1b15] px-4 py-3 rounded border border-[#4e342e] shadow-sm group hover:border-[#ffb300]/30 transition-colors">
+            {players.map((p) => (
+              <div key={p.user_id} className="flex justify-between items-center bg-[#2d1b15] px-4 py-3 rounded border border-[#4e342e] shadow-sm group hover:border-[#ffb300]/30 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-[#3e2723] rounded-full flex items-center justify-center border border-[#5d4037]">🃏</div>
                   <span className="font-rye text-lg text-[#d7ccc8] truncate max-w-[120px]">{p.name}</span>
@@ -79,16 +160,106 @@ export const LoteriaLobby = ({ code, players, isHost, onStart, onAbandon }: Lote
           </div>
         </div>
 
+        {/* APUESTA (SUGERIDA) */}
+        <div className="bg-[#4e342e] p-4 rounded mb-6 border-2 border-[#6d4c41] shadow-lg">
+          <div className="flex flex-col gap-2">
+            <span className="text-[#d7ccc8] text-xs uppercase tracking-widest font-bold border-b border-[#8d6e63] pb-1">
+              Apuesta (cada quien decide)
+            </span>
+
+            {/* Apuesta personal */}
+            <div className="mt-2 bg-[#2d1b15] border border-[#5d4037] rounded p-3 shadow-inner">
+              <div className="text-[#a1887f] text-[10px] uppercase tracking-widest font-bold mb-2">
+                Tu apuesta
+              </div>
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  onClick={() => setMyBet(v => Math.max(10, v - 10))}
+                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  step={10}
+                  value={myBet}
+                  onChange={(e) => setMyBet(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-32 bg-[#1a100e] text-[#ffecb3] font-rye text-3xl text-center py-2 rounded border-2 border-[#8d6e63] focus:border-[#ffb300] outline-none"
+                />
+                <button
+                  onClick={() => setMyBet(v => v + 10)}
+                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
+                >
+                  +
+                </button>
+              </div>
+              <p className="text-[#a1887f] text-[10px] font-mono mt-2">
+                Se usará esta cantidad cuando entres a pagar (pantalla “ready?”).
+              </p>
+              {bank !== null && myBet > bank && (
+                <p className="text-red-300 text-[10px] font-mono mt-1">
+                  No alcanza tu banco para esa apuesta.
+                </p>
+              )}
+            </div>
+
+            {isHost ? (
+              <div className="flex items-center justify-center gap-4 mt-2">
+                <button
+                  onClick={() => setFeeInput(v => Math.max(0, v - 10))}
+                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
+                >
+                  -
+                </button>
+                <span className="font-rye text-4xl text-[#4caf50] min-w-[120px] text-center drop-shadow-md bg-black/20 rounded px-2">
+                  $ {feeInput}
+                </span>
+                <button
+                  onClick={() => setFeeInput(v => v + 10)}
+                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
+                >
+                  +
+                </button>
+              </div>
+            ) : (
+              <div className="font-rye text-4xl text-[#4caf50] drop-shadow-md mt-2">$ {feeInput}</div>
+            )}
+            <p className="text-[#a1887f] text-[10px] font-mono mt-1">
+              El host puede ajustar una sugerencia. Cada jugador decide su apuesta arriba.
+            </p>
+          </div>
+        </div>
+
+        {/* Botón Ajustes */}
+        <motion.button
+          onClick={() => setShowSettings(true)}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className="w-full bg-[#5d4037] hover:bg-[#6d4c41] text-[#d7ccc8] font-rye font-bold py-3 rounded border-2 border-[#8d6e63] transition-colors uppercase text-sm flex items-center justify-center gap-2 mb-4"
+        >
+          <span className="text-lg">⚙️</span>
+          <span>Ajustes</span>
+        </motion.button>
+
+        {settingsError && (
+          <div className="mb-4 bg-red-900/40 border border-red-700 text-red-200 rounded p-3 text-xs font-mono">
+            {settingsError}
+          </div>
+        )}
+
         {/* BOTÓN DE ACCIÓN DEL HOST */}
         {isHost ? (
           <motion.button 
-            onClick={onStart}
+            onClick={handleOpenTable}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className="w-full bg-[#ffb300] hover:bg-[#ffca28] text-[#3e2723] font-rye text-2xl py-5 rounded border-b-[6px] border-[#ff6f00] active:border-b-0 active:translate-y-1 transition-all shadow-xl uppercase tracking-wider flex flex-col items-center leading-none gap-1"
           >
-            <span>COMENZAR JUEGO</span>
-            <span className="text-[10px] font-sans font-bold opacity-70 tracking-[0.2em] font-normal">INICIAR LOTERÍA</span>
+            <span>{feeInput > 0 ? 'ABRIR MESA DE PAGOS' : 'COMENZAR JUEGO'}</span>
+            <span className="text-[10px] font-sans font-bold opacity-70 tracking-[0.2em] font-normal">
+                {feeInput > 0 ? `Entrada: $${feeInput}` : 'Juego Libre'}
+            </span>
           </motion.button>
         ) : (
           <motion.div 
@@ -100,6 +271,16 @@ export const LoteriaLobby = ({ code, players, isHost, onStart, onAbandon }: Lote
           </motion.div>
         )}
       </div>
+
+      {/* Modal Ajustes (visible para todos; solo host puede editar/guardar) */}
+      <LoteriaSettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSave={handleSaveSettings}
+        isHost={isHost}
+        initialSpeedMs={gameSpeedMs || 5000}
+        initialEnabledPatterns={enabledPatterns}
+      />
     </div>
   );
 };

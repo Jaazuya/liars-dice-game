@@ -1,17 +1,38 @@
 'use client';
 import { Player } from "@/app/types/game";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from 'framer-motion';
 import { WesternDecor } from './WesternDecor';
+import { supabase } from "@/app/lib/supabase";
 
 export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, onKick, onAbandon, allowCheats, onToggleCheats, randomTurns, onToggleRandomTurns }: any) => {
     const [copied, setCopied] = useState(false);
+    const [bank, setBank] = useState<number | null>(null);
 
     const copyCode = () => {
         navigator.clipboard.writeText(code);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
+
+    useEffect(() => {
+        let mounted = true;
+        const fetchBank = async () => {
+            const { data } = await supabase.auth.getUser();
+            const uid = data.user?.id;
+            if (!uid) return;
+
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('global_balance')
+                .eq('id', uid)
+                .single() as any;
+
+            if (mounted) setBank(profileData?.global_balance ?? null);
+        };
+        fetchBank();
+        return () => { mounted = false; };
+    }, []);
 
     return (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center z-10 w-full min-h-screen bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] bg-[#2d1b15] relative overflow-hidden">
@@ -62,6 +83,10 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
                         ) : (
                             <div className="font-rye text-4xl text-[#4caf50] drop-shadow-md mt-2">$ {entryFee}</div>
                         )}
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-[#8d6e63]/40 flex items-center justify-between">
+                        <span className="text-[#d7ccc8] text-xs uppercase tracking-widest font-bold">Banco</span>
+                        <span className="font-rye text-lg text-[#81c784]">Banco: ${bank?.toLocaleString?.() ?? '...'}</span>
                     </div>
                 </div>
 
@@ -125,11 +150,10 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
                     </div>
                 </div>
 
-                {/* LISTA DE JUGADORES (Con dinero y botón Kick) */}
+                {/* LISTA DE JUGADORES (Sin dinero local; economía global) */}
                 <div className="mb-8">
                     <div className="flex justify-between items-end mb-2 px-1">
                         <span className="text-[#a1887f] text-xs uppercase tracking-widest">Forajidos ({players.length})</span>
-                        <span className="text-[#a1887f] text-xs uppercase tracking-widest">Billetera</span>
                     </div>
                     
                     <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2 bg-[#2d1b15]/50 p-2 rounded border border-[#5d4037]">
@@ -142,8 +166,6 @@ export const Lobby = ({ code, players, isHost, entryFee, onUpdateFee, onStart, o
                                 </div>
                                 
                                 <div className="flex items-center gap-3">
-                                    <span className={`font-rye text-lg ${p.money < entryFee ? "text-red-400 animate-pulse" : "text-[#81c784]"}`}>$ {p.money}</span>
-                                    
                                     {/* BOTÓN EXPULSAR (Solo lo ve el Host) */}
                                     {isHost && !p.is_host && (
                                         <button 

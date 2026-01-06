@@ -54,64 +54,80 @@ export default function Home() {
 
     try {
       const playerId = uuidv4();
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const makeCode = () => Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 
-      // 1. Crear la sala y pedir SOLO el código
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .insert([
-          { 
-            host_id: user.id, 
-            game_type: gameType, 
-            status: 'WAITING' 
+      let roomCode = '';
+      let diceRoomId: string | null = null; // UUID real (dice_rooms.id)
+      let attempts = 0;
+      while (!roomCode && attempts < 10) {
+        attempts += 1;
+        const candidate = makeCode();
+
+        if (gameType === 'DICE') {
+          // ✅ Esquema correcto: dice_rooms tiene `id` (UUID) y `code` (string)
+          const { data: roomData, error } = await supabase
+            .from('dice_rooms')
+            .insert([{ code: candidate, host_id: user.id } as any])
+            .select('id, code')
+            .single();
+
+          if (!error && roomData?.id) {
+            roomCode = roomData.code || candidate;
+            diceRoomId = roomData.id;
+          } else if (error?.code && error.code !== '23505') {
+            throw new Error(`No se pudo crear sala de Dados: ${error.message}`);
           }
-        ])
-        .select('code') // <--- IMPORTANTE: Solo pedimos 'code'
-        .single();
+        } else {
+          // Lotería: host_id es OBLIGATORIO (economía global + permisos)
+          const { error } = await supabase
+            .from('loteria_rooms')
+            .insert([{
+              room_code: candidate,
+              host_id: user.id,
+              entry_fee: 0,
+              is_playing: false,
+              // Evita que defaults (ej. [] en jsonb) activen GameOver al crear sala
+              game_over_data: null,
+              claimed_awards: {},
+              drawn_cards: [],
+              current_card: null,
+              last_game_event: null
+            } as any]);
 
-      // VALIDACIÓN ESTRICTA: Si falla, NO SEGUIR
-      if (roomError || !roomData) {
-        console.error("Error creando sala:", roomError);
-        throw new Error("Error al crear la sala en base de datos.");
-      }
-
-      const roomCode = roomData.code;
-
-      // 2. Si es Lotería, inicializar la tabla específica
-      if (gameType === 'LOTERIA') {
-        const { error: loteriaError } = await supabase
-          .from('loteria_rooms')
-          .insert([
-            { 
-              room_code: roomCode, // Usamos el código retornado
-              is_playing: false 
-            }
-          ]);
-
-        if (loteriaError) {
-          console.error("Error creando loteria_rooms:", loteriaError);
-          throw loteriaError;
+          if (!error) {
+            roomCode = candidate;
+          } else if (error.code && error.code !== '23505') {
+            throw new Error(`No se pudo crear sala de Lotería: ${error.message}`);
+          }
         }
       }
 
-      // 3. Crear jugador (host)
-      const { error: playerError } = await supabase
-        .from('players')
-        .insert([{ 
-          id: playerId, 
-          room_code: roomCode,
-          name: profile.username, 
-          is_host: true,
-          user_id: user.id
-        }]);
+      if (!roomCode) throw new Error(
+        gameType === 'LOTERIA'
+          ? 'No se pudo crear sala de Lotería: tu BD aún tiene un FK loteria_rooms.room_code -> rooms(code). Elimina esa FK (o migra el esquema) para poder crear salas sin rooms.'
+          : 'No se pudo generar un código de sala disponible.'
+      );
 
-      if (playerError) {
-        console.error("Error creando jugador:", playerError);
-        throw playerError;
+      // Crear jugador host SOLO para dados (lotería se crea en hook al entrar)
+      if (gameType === 'DICE') {
+        if (!diceRoomId) throw new Error('No se pudo obtener el UUID de la sala de Dados.');
+
+        const { error: playerError } = await supabase
+          .from('dice_players')
+          .insert([{
+            id: playerId,
+            room_id: diceRoomId, // ✅ UUID real, NO el code
+            name: profile.username,
+            user_id: user.id,
+            is_host: true,
+          } as any]);
+
+        if (playerError) throw playerError;
+        localStorage.setItem('playerId', playerId);
       }
 
       // Si llegamos aquí, TODO EXISTE en la BD.
-      localStorage.setItem('playerId', playerId);
-
       // 4. Redirigir SOLO AHORA
       if (gameType === 'LOTERIA') {
         router.push(`/loteria/room/${roomCode}`);
@@ -148,23 +164,39 @@ export default function Home() {
     const codeUpper = joinCode.toUpperCase();
 
     try {
-      // Obtener game_type de la sala
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .select('code, status, game_type')
+      // 1) Buscar primero en DADOS
+      const { data: diceRoom } = await supabase
+        .from('dice_rooms')
+        .select('id, code, game_phase')
         .eq('code', codeUpper)
-        .single();
-      
-      if (roomError || !roomData) {
-        alert('Esa sala no existe, compañero.');
-        setIsLoading(false);
+        .single() as any;
+
+      if (diceRoom) {
+        const { error } = await supabase
+          .from('dice_players')
+          .insert([{
+            id: playerId,
+            room_id: diceRoom.id, // ✅ UUID real
+            name: profile.username,
+            user_id: user.id,
+            is_host: false,
+          } as any]);
+
+        if (error) throw error;
+
+        localStorage.setItem('playerId', playerId);
+        router.push(`/room/${codeUpper}`);
         return;
       }
 
-      const gameType = roomData.game_type || 'DICE';
+      // 2) Si no existe, buscar en LOTERÍA
+      const { data: loteriaRoom } = await supabase
+        .from('loteria_rooms')
+        .select('room_code')
+        .eq('room_code', codeUpper)
+        .single() as any;
 
-      // Capacidad: máximo 10 jugadores (según loteria_players)
-      if (gameType === 'LOTERIA') {
+      if (loteriaRoom) {
         const { count: lpCount, error: lpErr } = await supabase
           .from('loteria_players')
           .select('*', { count: 'exact', head: true })
@@ -175,39 +207,14 @@ export default function Home() {
           setIsLoading(false);
           return;
         }
-      }
 
-      const playerData: any = {
-        id: playerId,
-        room_code: codeUpper,
-        name: profile.username,
-        is_host: false,
-        user_id: user.id,
-        seat_index: null
-      };
-
-      // Solo agregar campos de dados si es juego de dados
-      if (gameType === 'DICE' && roomData.status === 'playing') {
-        playerData.dice_values = [];
-        playerData.money = 0;
-        playerData.current_contribution = 0;
-        playerData.is_ready = false;
-      }
-
-      const { error } = await supabase
-        .from('players')
-        .insert([playerData]);
-
-      if (error) throw error;
-
-      localStorage.setItem('playerId', playerId);
-      
-      // Redirigir según el tipo de juego
-      if (gameType === 'LOTERIA') {
         router.push(`/loteria/room/${codeUpper}`);
-      } else {
-        router.push(`/room/${codeUpper}`);
+        return;
       }
+
+      alert('Ese código no existe en Dados ni en Lotería.');
+      setIsLoading(false);
+      return;
 
     } catch (error) {
       console.error(error);

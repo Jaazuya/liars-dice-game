@@ -25,48 +25,38 @@ export default function LoteriaLobby() {
       return;
     }
     setIsLoading(true);
-    const newRoomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const roomId = uuidv4();
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const makeCode = () => Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
     const playerId = uuidv4();
 
     try {
-      // Crear sala con game_type = 'LOTERIA'
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .insert([{ 
-          id: roomId,
-          code: newRoomCode,
-          game_type: 'LOTERIA'
-        }])
-        .select()
-        .single();
+      let roomCode = '';
+      let attempts = 0;
+      while (!roomCode && attempts < 10) {
+        attempts += 1;
+        const candidate = makeCode();
+        const { error } = await supabase
+          .from('loteria_rooms')
+          .insert([{
+            room_code: candidate,
+            host_id: user.id,
+            entry_fee: 0,
+            is_playing: false,
+            // Evita que defaults (ej. [] en jsonb) activen GameOver al entrar a una sala nueva
+            game_over_data: null,
+            claimed_awards: {},
+            drawn_cards: [],
+            current_card: null,
+            last_game_event: null
+          } as any]);
+        if (!error) roomCode = candidate;
+      }
 
-      if (roomError) throw roomError;
+      if (!roomCode) throw new Error('No se pudo generar un código de mesa disponible.');
 
-      // Crear registro en loteria_rooms
-      const { error: loteriaError } = await supabase
-        .from('loteria_rooms')
-        .insert([{
-          room_code: newRoomCode,
-          current_card: null,
-          drawn_cards: [],
-          winner_id: null,
-          is_playing: false
-        }]);
-
-      if (loteriaError) throw loteriaError;
-
-      // Crear jugador
-      await supabase.from('players').insert([{ 
-        id: playerId, 
-        room_code: newRoomCode, 
-        name: profile.username, 
-        is_host: true,
-        user_id: user.id
-      }]);
-
+      // Guardamos playerId (solo para UI/compatibilidad; la membresía se maneja en loteria_players)
       localStorage.setItem('playerId', playerId);
-      router.push(`/loteria/room/${newRoomCode}`);
+      router.push(`/loteria/room/${roomCode}`);
     } catch (error) {
       console.error(error);
       alert('Error al crear la mesa de lotería.');
@@ -93,21 +83,14 @@ export default function LoteriaLobby() {
     const codeUpper = joinCode.toUpperCase();
 
     try {
-      // Verificar que la sala existe y es de tipo LOTERIA
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .select('id, code, game_type')
-        .eq('code', codeUpper)
+      // Verificar que la mesa existe en loteria_rooms
+      const { data: loteriaRoom, error: roomError } = await supabase
+        .from('loteria_rooms')
+        .select('room_code')
+        .eq('room_code', codeUpper)
         .single();
-      
-      if (roomError || !roomData) {
+      if (roomError || !loteriaRoom) {
         alert('Esa mesa no existe, compañero.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (roomData.game_type !== 'LOTERIA') {
-        alert('Esa sala no es de Lotería. Verifica el código.');
         setIsLoading(false);
         return;
       }
@@ -123,19 +106,6 @@ export default function LoteriaLobby() {
         setIsLoading(false);
         return;
       }
-
-      // Insertar jugador
-      const { error: playerError } = await supabase
-        .from('players')
-        .insert([{
-          id: playerId,
-          room_code: codeUpper,
-          name: profile.username,
-          is_host: false,
-          user_id: user.id
-        }]);
-
-      if (playerError) throw playerError;
 
       localStorage.setItem('playerId', playerId);
       router.push(`/loteria/room/${codeUpper}`);

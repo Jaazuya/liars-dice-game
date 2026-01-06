@@ -4,12 +4,18 @@ export interface Player {
     name: string;
     is_host: boolean;
     dice_values: number[] | null;
-    created_at: string;
-    money: number;
-    current_contribution: number;
+    created_at?: string;
     is_ready: boolean; // NUEVO
     seat_index: number | null; // Índice de asiento aleatorio
-    has_used_cheat: boolean; // Si ya usó el truco de espionaje
+    has_used_cheat?: boolean; // Truco usado (1 vez por partida)
+}
+
+export interface DiceGameOverEntry {
+    user_id?: string;
+    username: string;
+    rank: number; // 1..3
+    payout: number;
+    score?: number;
 }
 
 export interface VoteData {
@@ -31,26 +37,30 @@ export interface GameOverData {
     winnerName: string;
     runnerUp: string | null;
     runnerUpName: string | null;
+    third: string | null;
+    thirdName: string | null;
     amounts: {
         winner: number;
         runnerUp: number;
+        third?: number;
     };
     losers: string[];
     totalPot: number;
 }
 
 export interface GameState {
-    status: 'waiting' | 'boarding' | 'playing'; // NUEVO ESTADO 'boarding'
+    status: 'waiting' | 'boarding' | 'playing' | 'finished' | 'not_found'; // NUEVO ESTADO 'finished'
     pot: number;
     entryFee: number;
     currentTurnId: string | null;
+    lastBetUserId: string | null; // dice_rooms.last_bet_player_id (auth.user.id)
     currentBet: {
         quantity: number;
         face: number;
     };
     voteData: VoteData | null; // NUEVO
     notificationData: NotificationData | null; // Notificación global sincronizada
-    gameOverData: GameOverData | null; // Datos de fin de juego
+    gameOverData: DiceGameOverEntry[] | null; // Datos de fin de juego (backend)
     allowCheats: boolean; // Si la sala permite trucos
     randomTurns: boolean; // Si los turnos son aleatorios
     turnSequence: string[] | null; // Orden de turnos cuando randomTurns está activo

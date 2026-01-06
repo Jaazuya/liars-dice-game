@@ -3,15 +3,15 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/app/lib/supabase';
-import { useLoteriaGame } from '@/app/hooks/useLoteriaGame';
+import { useLoteriaGame } from '@/app/hooks/useLoteriaGame2';
 import TheDeck from '@/app/loteria/components/TheDeck';
 import { LoteriaBoard } from '@/app/loteria/components/LoteriaBoard';
 import { LoteriaLobby } from '@/app/loteria/components/LoteriaLobby';
+import { LoteriaPayment } from '@/app/loteria/components/LoteriaPayment';
 import { WinningPatterns } from '@/app/loteria/components/WinningPatterns';
 import { NotificationToast } from '@/app/loteria/components/NotificationToast';
 import { PlayersModal } from '@/app/loteria/components/PlayersModal';
 import { GameOverScreen } from '@/app/loteria/components/GameOverScreen';
-import { Player } from '@/app/types/game';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User } from '@supabase/supabase-js';
 
@@ -20,8 +20,7 @@ export default function LoteriaRoomPage() {
   const router = useRouter();
   const roomCode = id as string;
   const [user, setUser] = useState<User | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const storedPlayerId = typeof window !== 'undefined' ? localStorage.getItem('playerId') : null;
+  const [players, setPlayers] = useState<{ user_id: string; name: string; is_host?: boolean }[]>([]);
   const [gameSpeed, setGameSpeed] = useState(5000);
   const [showSettings, setShowSettings] = useState(false);
   const [showPlayers, setShowPlayers] = useState(false);
@@ -48,14 +47,25 @@ export default function LoteriaRoomPage() {
     claimAward,
     lastNotification,
     playersScores,
+    playersPaymentStatus,
     closeNotification,
     returnToLobby,
     leaderboard,
-    joinError
+    joinError,
+    payEntry,
+    updateEntryFee
   } = useLoteriaGame(roomCode, user);
 
   // Calcular puntuación personal
   const myScore = user?.id ? (playersScores[user.id] || 0) : 0;
+
+  // Si el host configuró velocidad en BD, usarla como fuente de verdad
+  useEffect(() => {
+    const ms = (loteriaRoom as any)?.game_speed_ms;
+    if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 1000 && ms <= 30000) {
+      setGameSpeed(ms);
+    }
+  }, [loteriaRoom as any]);
 
   // Debug: Log cuando cambie current_card
   useEffect(() => {
@@ -74,43 +84,62 @@ export default function LoteriaRoomPage() {
   useEffect(() => {
     if (!roomCode) return;
     const fetchPlayers = async () => {
-      const { data: playersData } = await supabase
-        .from('players')
-        .select('*')
-        .eq('room_code', roomCode)
-        .order('created_at', { ascending: true });
-      if (playersData) {
-        setPlayers(playersData);
+      const { data } = await supabase
+        .from('loteria_players')
+        .select('user_id, profiles(username)')
+        .eq('room_code', roomCode) as any;
+
+      if (Array.isArray(data)) {
+        setPlayers(data.map((row: any) => ({
+          user_id: row.user_id,
+          name: row?.profiles?.username || 'Jugador',
+          is_host: row.user_id === loteriaRoom?.host_id
+        })));
       }
     };
     fetchPlayers();
+
     const channel = supabase.channel(`loteria_players_${roomCode}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'players',
+        table: 'loteria_players',
         filter: `room_code=eq.${roomCode}`
-      }, () => {
-        fetchPlayers();
-      })
+      }, () => fetchPlayers())
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'loteria_rooms',
+        filter: `room_code=eq.${roomCode}`
+      }, () => fetchPlayers())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roomCode, storedPlayerId]);
+  }, [roomCode, loteriaRoom?.host_id]);
 
+  // Lobby -> Pago: abrir fase de pago (NO iniciar la partida todavía)
+  const handleOpenPayments = async () => {
+    if (!isHost) return;
+    const current = loteriaRoom?.entry_fee ?? 0;
+    // Si el host aún no definió sugerencia, abrimos con un mínimo razonable
+    const nextFee = current > 0 ? current : 50;
+    await updateEntryFee(nextFee);
+  };
+
+  // Pago -> Juego: iniciar partida cuando TODOS pagaron
   const handleStartGame = async () => {
     if (!isHost) return;
-    // Usar la función del hook que tiene actualización optimista
     await startGame();
   };
 
   const handleAbandon = async () => {
-    if (!storedPlayerId) return;
+    if (!user?.id) return;
     await supabase
-      .from('players')
+      .from('loteria_players')
       .delete()
-      .eq('id', storedPlayerId);
+      .eq('room_code', roomCode)
+      .eq('user_id', user.id);
     router.push('/');
   };
 
@@ -152,29 +181,68 @@ export default function LoteriaRoomPage() {
     );
   }
 
-  if (!loteriaRoom?.is_playing) {
-    if (loteriaRoom?.claimed_awards?.['llenas']) {
-       return (
+  // 1. GAME OVER (backend-driven): solo mostramos si existe `game_over_data`.
+  // Antes también se activaba por `claimed_awards.llenas`, lo cual dejaba la UI "atorada" en GameOver incluso al volver a lobby.
+  const hasGameOverData =
+    Array.isArray(loteriaRoom?.game_over_data) ? loteriaRoom!.game_over_data.length > 0 : !!loteriaRoom?.game_over_data;
+  const claimedLlenas = !!loteriaRoom?.claimed_awards?.['llenas'];
+
+  // Si la partida terminó por LLENAS pero aún no llega game_over_data, mostramos la pantalla con estado "pendiente".
+  if (!loteriaRoom?.is_playing && (hasGameOverData || claimedLlenas)) {
+      return (
          <GameOverScreen 
            leaderboard={leaderboard}
+           gameOverData={loteriaRoom?.game_over_data}
+           payoutPending={claimedLlenas && !hasGameOverData}
            isHost={isHost}
-           onRestart={resetGame}
-           onReturnToLobby={returnToLobby}
+           // ✅ "Nueva Partida" (solo host): vuelve a la sala de espera de ESTA misma sala (no Pago)
+           onRestart={returnToLobby}
+           // ✅ "Volver al Saloon": regresa al dashboard principal
+           onReturnToLobby={() => router.push('/')}
          />
        );
-    }
+  }
 
+  // 2. FASE DE PAGO (Boarding)
+  // Se activa si hay un Fee definido Y (no estamos jugando O yo no he pagado)
+  const entryFee = loteriaRoom?.entry_fee || 0;
+  const hasPaid = user?.id ? playersPaymentStatus[user.id] : false;
+  
+  if (entryFee > 0 && (!loteriaRoom?.is_playing || !hasPaid)) {
+      return (
+         <LoteriaPayment
+             entryFee={entryFee}
+             players={players} // Nombres
+             playersPaymentStatus={playersPaymentStatus} // Status Pago
+             myId={user?.id}
+             isHost={isHost}
+             onPay={(amount) => payEntry(amount)}
+             onStartGame={handleStartGame}
+             onAbandon={handleAbandon}
+         />
+      );
+  }
+
+  // 3. LOBBY (Sala de Espera)
+  // Si no hay fee definido y no estamos jugando
+  if (!loteriaRoom?.is_playing) {
     return (
       <LoteriaLobby
         code={roomCode}
         players={players}
+        myId={user?.id}
         isHost={isHost}
-        onStart={handleStartGame}
+        onStart={handleOpenPayments}
         onAbandon={handleAbandon}
+        onUpdateFee={updateEntryFee}
+        suggestedFee={loteriaRoom?.entry_fee || 50}
+        enabledPatterns={(loteriaRoom as any)?.enabled_patterns}
+        gameSpeedMs={(loteriaRoom as any)?.game_speed_ms}
       />
     );
   }
 
+  // 4. JUEGO ACTIVO
   return (
     <main className="min-h-screen relative overflow-hidden bg-[#2d1b15]">
       
@@ -339,13 +407,13 @@ export default function LoteriaRoomPage() {
               </div>
             )}
             
-            {/* Botón flotante para abrir Drawer de Metas (Solo Mobile) */}
+            {/* Botón "¡BUENAS!" (Ver Metas) - Fijo en esquina inferior derecha, alargado */}
             <button 
                 onClick={() => setIsDrawerOpen(true)}
-                className="lg:hidden absolute bottom-4 right-4 z-40 bg-[#ffb300] text-[#3e2723] w-12 h-12 rounded-full shadow-xl flex items-center justify-center border-2 border-[#3e2723] animate-bounce"
-                title="Ver Metas"
+                className="lg:hidden absolute bottom-4 right-4 z-40 bg-[#ffb300] hover:bg-[#ffca28] text-[#3e2723] font-rye px-6 py-3 rounded-l-full rounded-tr-lg border-2 border-[#5d4037] shadow-[4px_4px_0px_rgba(0,0,0,0.5)] flex items-center gap-2 transition-all active:scale-95 animate-pulse"
             >
-                🏆
+                <span className="text-xl">🏆</span>
+                <span className="uppercase tracking-widest font-bold">¡BUENAS!</span>
             </button>
         </div>
 
@@ -355,6 +423,7 @@ export default function LoteriaRoomPage() {
                <WinningPatterns 
                  claimedAwards={loteriaRoom?.claimed_awards}
                  onClaim={claimAward}
+                 enabledPatterns={(loteriaRoom as any)?.enabled_patterns}
                />
             </div>
 
@@ -373,30 +442,32 @@ export default function LoteriaRoomPage() {
                     className="fixed inset-0 bg-black/60 z-50 lg:hidden"
                 />
                 
-                {/* Panel Deslizable */}
+                {/* Panel Deslizable - Más "Modal-ish" pero pegado a la orilla */}
                 <motion.div
-                    initial={{ x: '100%' }}
-                    animate={{ x: 0 }}
-                    exit={{ x: '100%' }}
+                    initial={{ y: '100%' }}
+                    animate={{ y: 0 }}
+                    exit={{ y: '100%' }}
                     transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                    className="fixed top-0 right-0 h-full w-80 max-w-[85vw] bg-[#2d1b15] border-l-4 border-[#5d4037] z-50 shadow-2xl flex flex-col lg:hidden"
+                    className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-[#2d1b15] border-t-4 border-[#5d4037] z-50 shadow-2xl flex flex-col rounded-t-2xl lg:hidden"
                 >
-                    <div className="flex items-center justify-between p-4 bg-[#3e2723] border-b border-[#5d4037]">
-                        <h2 className="font-rye text-[#ffb300] text-xl">🏆 Metas y Premios</h2>
+                    <div className="flex items-center justify-between p-4 bg-[#3e2723] border-b border-[#5d4037] rounded-t-xl">
+                        <h2 className="font-rye text-[#ffb300] text-xl">🏆 Premios Disponibles</h2>
                         <button 
                             onClick={() => setIsDrawerOpen(false)}
-                            className="text-[#d7ccc8] hover:text-white text-2xl"
+                            className="bg-[#5d4037] text-[#d7ccc8] rounded-full w-8 h-8 flex items-center justify-center hover:bg-[#6d4c41]"
                         >
                             ✕
                         </button>
                     </div>
                     
-                    <div className="flex-1 overflow-y-auto p-4">
+                    <div className="flex-1 overflow-y-auto p-4 pb-8">
                         <WinningPatterns 
                            claimedAwards={loteriaRoom?.claimed_awards}
                            onClaim={(pattern) => {
                                claimAward(pattern);
+                               // No cerramos drawer para ver el feedback visual
                            }}
+                           enabledPatterns={(loteriaRoom as any)?.enabled_patterns}
                         />
                     </div>
                 </motion.div>
