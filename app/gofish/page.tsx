@@ -3,20 +3,20 @@
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { supabase } from '@/app/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import GoFishWaitingRoom from './components/GoFishWaitingRoom';
 // 1. IMPORTANTE: Traemos el Tablero de Juego
 import GoFishGameBoard from './components/GoFishGameBoard';
 
-export default function GoFishPage() {
+function GoFishContent() {
   const [isMounted, setIsMounted] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   
   // Protección contra SSR: Solo acceder a searchParams después de montar
-  const roomCodeParam = isMounted ? searchParams.get('room') : null; 
+  const roomCodeParam = isMounted ? searchParams.get('room') : null;
 
   // 1. HOOKS: ESTADOS
   const [user, setUser] = useState<any>(null);
@@ -112,5 +112,17 @@ export default function GoFishPage() {
         Redirigiendo al Lobby principal...
       </div>
     </div>
+  );
+}
+
+export default function GoFishPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#1a0f0d] flex items-center justify-center">
+        <div className="text-[#ffb300] font-rye text-xl animate-pulse">Cargando pescador... 🎣</div>
+      </div>
+    }>
+      <GoFishContent />
+    </Suspense>
   );
 }
