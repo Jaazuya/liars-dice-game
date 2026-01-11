@@ -74,6 +74,11 @@ export const LoteriaLobby = ({ code, players, myId, isHost, onStart, onAbandon, 
     } catch {}
   }, [storageKey, myBet]);
 
+  useEffect(() => {
+    // Si el host definió sugerencia desde afuera (props), mantenerlo sincronizado aunque ya no mostremos el control redundante.
+    setFeeInput(suggestedFee);
+  }, [suggestedFee]);
+
   const handleOpenTable = () => {
     if (onUpdateFee) {
         // Actualiza sugerencia y abre la fase de pago (entry_fee > 0)
@@ -163,71 +168,35 @@ export const LoteriaLobby = ({ code, players, myId, isHost, onStart, onAbandon, 
         {/* APUESTA (SUGERIDA) */}
         <div className="bg-[#4e342e] p-4 rounded mb-6 border-2 border-[#6d4c41] shadow-lg">
           <div className="flex flex-col gap-2">
-            <span className="text-[#d7ccc8] text-xs uppercase tracking-widest font-bold border-b border-[#8d6e63] pb-1">
-              Apuesta (cada quien decide)
+            <span className="text-[#d7ccc8] text-xs uppercase tracking-widest font-bold border-b border-[#8d6e63] pb-2">
+              TU APUESTA
             </span>
 
             {/* Apuesta personal */}
-            <div className="mt-2 bg-[#2d1b15] border border-[#5d4037] rounded p-3 shadow-inner">
-              <div className="text-[#a1887f] text-[10px] uppercase tracking-widest font-bold mb-2">
-                Tu apuesta
-              </div>
-              <div className="flex items-center justify-center gap-4">
+            <div className="mt-3 bg-[#2d1b15] border border-[#5d4037] rounded p-4 shadow-inner">
+              <div className="flex items-center justify-center gap-3 sm:gap-4">
                 <button
                   onClick={() => setMyBet(v => Math.max(10, v - 10))}
-                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
+                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-2xl"
                 >
                   -
                 </button>
-                <input
-                  type="number"
-                  min={1}
-                  step={10}
-                  value={myBet}
-                  onChange={(e) => setMyBet(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-32 bg-[#1a100e] text-[#ffecb3] font-rye text-3xl text-center py-2 rounded border-2 border-[#8d6e63] focus:border-[#ffb300] outline-none"
-                />
+                <div className="font-rye text-4xl sm:text-5xl text-[#4caf50] drop-shadow-[2px_2px_0px_rgba(0,0,0,1)] bg-black/20 rounded px-4 py-2 min-w-[170px] text-center">
+                  $ {myBet}
+                </div>
                 <button
                   onClick={() => setMyBet(v => v + 10)}
-                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
+                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-2xl"
                 >
                   +
                 </button>
               </div>
-              <p className="text-[#a1887f] text-[10px] font-mono mt-2">
-                Se usará esta cantidad cuando entres a pagar (pantalla “ready?”).
-              </p>
               {bank !== null && myBet > bank && (
                 <p className="text-red-300 text-[10px] font-mono mt-1">
                   No alcanza tu banco para esa apuesta.
                 </p>
               )}
             </div>
-
-            {isHost ? (
-              <div className="flex items-center justify-center gap-4 mt-2">
-                <button
-                  onClick={() => setFeeInput(v => Math.max(0, v - 10))}
-                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
-                >
-                  -
-                </button>
-                <span className="font-rye text-4xl text-[#4caf50] min-w-[120px] text-center drop-shadow-md bg-black/20 rounded px-2">
-                  $ {feeInput}
-                </span>
-                <button
-                  onClick={() => setFeeInput(v => v + 10)}
-                  className="w-10 h-10 rounded bg-[#3e2723] text-[#d7ccc8] font-rye border-2 border-[#8d6e63] hover:bg-[#ffb300] hover:text-black hover:border-[#ff6f00] transition-all text-xl"
-                >
-                  +
-                </button>
-              </div>
-            ) : (
-              <div className="font-rye text-4xl text-[#4caf50] drop-shadow-md mt-2">$ {feeInput}</div>
-            )}
-            <p className="text-[#a1887f] text-[10px] font-mono mt-1">
-              El host puede ajustar una sugerencia. Cada jugador decide su apuesta arriba.
-            </p>
           </div>
         </div>
 

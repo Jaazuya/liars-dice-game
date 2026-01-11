@@ -11,14 +11,16 @@ import { DiceCup } from '@/app/components/DiceCup';
 import { GameSettings } from '@/app/components/GameSettings';
 import { GameNotification } from '@/app/components/GameNotification';
 import { RoundResult } from '@/app/components/RoundResult';
-import { GameOverScreen } from '@/app/components/GameOverScreen';
+import GameOverScreen from '@/app/components/GameOverScreen';
 import { WesternDecor } from '@/app/components/WesternDecor';
+import WesternNotificationBanner from '@/app/components/WesternNotificationBanner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from '@/app/lib/supabase';
 
 export default function RoomPage() {
   const { code } = useParams();
   const codeStr = (Array.isArray(code) ? code[0] : code || '').toString().toUpperCase();
-  const { players, myId, gameState, getDiceEmoji, actions, loading } = useLiarGame(
+  const { players, myId, gameState, roomId, getDiceEmoji, actions, loading } = useLiarGame(
     codeStr,
     (message, type) => setNotification({ message, type }),
     // onRoundResult ya no se usa, las notificaciones vienen de gameState.notificationData
@@ -34,6 +36,7 @@ export default function RoomPage() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type?: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+  const [showGameOver, setShowGameOver] = useState(false);
   const gameContainerRef = useRef<HTMLDivElement>(null);
 
   // Variable derivada necesaria para hooks subsiguientes
@@ -97,6 +100,33 @@ export default function RoomPage() {
     }
   }, [myPlayer?.dice_values, sounds]); // myPlayer se usa aquí
 
+  // Función para cerrar la notificación (definida antes del useEffect que la usa)
+  const handleCloseNotification = () => {
+    // Esto borra los datos y hace desaparecer el cartel
+    // Nota: El notificationData se limpia automáticamente desde el backend,
+    // pero podemos forzar la limpieza local si es necesario
+    // Por ahora, el backend maneja la limpieza automática
+  };
+
+  // Control del retraso dramático para Game Over (5 segundos después de que termine el juego)
+  useEffect(() => {
+    if (gameState.status === 'finished' && gameState.gameOverData) {
+      // Esperamos 5 segundos de drama...
+      const timer = setTimeout(() => {
+        // 1. 🔥 MATAMOS LA NOTIFICACIÓN (Para que no estorbe)
+        // Cierra la notificación justo antes de mostrar la pantalla de victoria
+        handleCloseNotification();
+        
+        // 2. MOSTRAMOS LA PANTALLA DE VICTORIA
+        setShowGameOver(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else {
+      // Si el juego se reinicia o cambia de estado, ocultamos la pantalla
+      setShowGameOver(false);
+    }
+  }, [gameState.status, gameState.gameOverData, handleCloseNotification]);
+
   // Funciones de zoom (incrementos de 5%)
   const handleZoomIn = () => {
     setZoomLevel(prev => {
@@ -127,6 +157,38 @@ export default function RoomPage() {
       ? players.find(p => p.user_id === gameState.lastBetUserId)?.name ||
         players.find(p => p.id === gameState.lastBetUserId)?.name
       : null) || null;
+
+  // Detectar si soy el host
+  const isHost = !!myPlayer?.is_host;
+
+  // Función para reiniciar la partida (Solo la usará el Host)
+  const handlePlayAgain = async () => {
+    if (!codeStr || !isHost) return;
+    
+    try {
+      console.log("Intentando reiniciar sala con código:", codeStr); // Para depurar
+
+      // 🔥 CAMBIO AQUÍ: Usamos 'p_room_code' y le pasamos la variable 'codeStr' (string)
+      const { error } = await supabase.rpc('reset_liar_game', { 
+        p_room_code: codeStr 
+      });
+      
+      if (error) {
+        // Imprime el mensaje real del error para verlo mejor
+        console.error('Error SQL:', error.message, error.details);
+        throw error;
+      }
+
+      console.log("¡Partida reiniciada con éxito!");
+      
+      // No necesitas hacer nada más, el Realtime detectará 
+      // el cambio de fase a 'lobby' y actualizará la pantalla solo.
+      
+    } catch (err) {
+      console.error("Error crítico reiniciando:", err);
+      // Aquí podrías mostrar una notificación de error si quieres
+    }
+  };
 
   // --- PANTALLA DE CARGA (MOVIDA DESPUÉS DE TODOS LOS HOOKS) ---
   if (loading) {
@@ -473,8 +535,8 @@ export default function RoomPage() {
         />
       )}
 
-      {/* NOTIFICACIONES DEL JUEGO */}
-      <AnimatePresence>
+      {/* NOTIFICACIONES DEL JUEGO - Deshabilitado: Solo usamos WesternNotificationBanner */}
+      {/* <AnimatePresence>
         {notification && (
           <GameNotification
             message={notification.message}
@@ -482,10 +544,10 @@ export default function RoomPage() {
             onClose={() => setNotification(null)}
           />
         )}
-      </AnimatePresence>
+      </AnimatePresence> */}
 
-      {/* RESULTADO DE RONDA (Anuncio Grande) - Sincronizado Globalmente */}
-      <AnimatePresence>
+      {/* RESULTADO DE RONDA - Deshabilitado: Solo usamos WesternNotificationBanner */}
+      {/* <AnimatePresence>
         {gameState.notificationData && (
           <RoundResult
             message={gameState.notificationData.message}
@@ -497,18 +559,25 @@ export default function RoomPage() {
             autoCloseDelay={undefined}
           />
         )}
-      </AnimatePresence>
+      </AnimatePresence> */}
 
-      {/* PANTALLA DE FIN DE JUEGO */}
+      {/* PANTALLA DE FIN DE JUEGO (Con retraso dramático de 5 segundos) */}
       <AnimatePresence>
-        {gameState.gameOverData && gameState.status === 'finished' && (
+        {showGameOver && gameState.gameOverData && (
           <GameOverScreen
             gameOverData={gameState.gameOverData}
-            isHost={!!myPlayer?.is_host}
-            onReset={actions.resetRoom}
+            currentUserId={myPlayer?.user_id || null}
+            isHost={isHost}
+            onPlayAgain={handlePlayAgain}
           />
         )}
       </AnimatePresence>
+
+      {/* 🔥 BANNER DE NOTIFICACIONES (ÚNICA INSTANCIA - Al final para que flote sobre todo) */}
+      <WesternNotificationBanner 
+        data={gameState.notificationData}
+        onClose={handleCloseNotification}
+      />
     </main>
   );
 }

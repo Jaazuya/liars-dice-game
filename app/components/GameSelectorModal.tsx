@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface GameSelectorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (gameType: 'DICE' | 'LOTERIA') => void;
+  onSelect: (gameType: 'DICE' | 'LOTERIA' | 'GOFISH') => void;
 }
 
 export const GameSelectorModal = ({ isOpen, onClose, onSelect }: GameSelectorModalProps) => {
@@ -24,7 +24,7 @@ export const GameSelectorModal = ({ isOpen, onClose, onSelect }: GameSelectorMod
           initial={{ scale: 0.8, y: 20 }}
           animate={{ scale: 1, y: 0 }}
           exit={{ scale: 0.8, y: 20 }}
-          className="bg-[#3e2723] border-[6px] border-[#ffb300] rounded-lg shadow-2xl max-w-md w-full p-8 relative wood-texture"
+          className="bg-[#3e2723] border-[6px] border-[#ffb300] rounded-lg shadow-2xl max-w-4xl w-full p-8 relative wood-texture"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Clavos decorativos */}
@@ -37,7 +37,7 @@ export const GameSelectorModal = ({ isOpen, onClose, onSelect }: GameSelectorMod
             ¿A qué jugaremos, forastero?
           </h2>
 
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Opción A: Dados Mentirosos */}
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -76,6 +76,27 @@ export const GameSelectorModal = ({ isOpen, onClose, onSelect }: GameSelectorMod
                 </span>
                 <p className="text-sm text-[#d7ccc8]">
                   El tradicional juego de cartas
+                </p>
+              </div>
+            </motion.button>
+
+            {/* Opción C: GO FISH */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                onSelect('GOFISH');
+                onClose();
+              }}
+              className="w-full bg-[#4e342e] hover:bg-[#5d4037] border-2 border-[#6d4c41] hover:border-[#ffb300] rounded-lg p-6 transition-all shadow-lg"
+            >
+              <div className="flex flex-col items-center gap-3">
+                <span className="text-5xl">🎣</span>
+                <span className="text-xl font-rye font-bold text-[#ffb300] uppercase">
+                  GO FISH
+                </span>
+                <p className="text-sm text-[#d7ccc8]">
+                  Pesca cartas de tus rivales y forma libros.
                 </p>
               </div>
             </motion.button>

@@ -1,0 +1,13 @@
+<svg width="169" height="245" viewBox="0 0 169 245" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0.5" y="0.5" width="168" height="244" rx="14.5" fill="white" stroke="#E0E0E0"/>
+    
+    <rect x="10" y="10" width="149" height="225" rx="10" fill="#991B1B"/>
+    
+    <path d="M84.5 40L94.5 60L84.5 80L74.5 60L84.5 40Z" fill="#7F1D1D"/>
+    <path d="M84.5 165L94.5 185L84.5 205L74.5 185L84.5 165Z" fill="#7F1D1D"/>
+    <path d="M40 102.5L50 122.5L40 142.5L30 122.5L40 102.5Z" fill="#7F1D1D"/>
+    <path d="M129 102.5L139 122.5L129 142.5L119 122.5L129 102.5Z" fill="#7F1D1D"/>
+    
+    <text x="84.5" y="118" fill="#FCD34D" font-family="'Times New Roman', serif" font-weight="bold" font-size="18" text-anchor="middle" letter-spacing="1">JAAZUYA'S</text>
+    <text x="84.5" y="138" fill="#FCD34D" font-family="'Times New Roman', serif" font-weight="bold" font-size="18" text-anchor="middle" letter-spacing="1">ARCADE</text>
+</svg>
