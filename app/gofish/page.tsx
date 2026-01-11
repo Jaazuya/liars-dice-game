@@ -1,5 +1,8 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
 import { useEffect, useState } from 'react';
 import { supabase } from '@/app/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -66,7 +69,7 @@ export default function GoFishPage() {
 
   // No renderizar nada en el servidor, solo en el cliente
   if (!isMounted) {
-    return null;
+    return <div className="min-h-screen bg-[#1a0f0d]" />;
   }
 
   if (loadingUser) {
