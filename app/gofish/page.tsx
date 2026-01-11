@@ -8,9 +8,12 @@ import GoFishWaitingRoom from './components/GoFishWaitingRoom';
 import GoFishGameBoard from './components/GoFishGameBoard';
 
 export default function GoFishPage() {
+  const [isMounted, setIsMounted] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const roomCodeParam = searchParams.get('room'); 
+  
+  // Protección contra SSR: Solo acceder a searchParams después de montar
+  const roomCodeParam = isMounted ? searchParams.get('room') : null; 
 
   // 1. HOOKS: ESTADOS
   const [user, setUser] = useState<any>(null);
@@ -19,8 +22,15 @@ export default function GoFishPage() {
 
   // 3. HOOKS: EFECTOS
   
-  // Efecto para verificar sesión
+  // Efecto para marcar el componente como montado (solo en cliente)
   useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Efecto para verificar sesión (solo después de montar)
+  useEffect(() => {
+    if (!isMounted) return;
+    
     const checkUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -31,7 +41,7 @@ export default function GoFishPage() {
       setLoadingUser(false);
     };
     checkUser();
-  }, [router]);
+  }, [isMounted, router]);
 
   // Efecto para detectar cambios en la sala
   useEffect(() => {
@@ -53,6 +63,11 @@ export default function GoFishPage() {
   // ============================================================
   // 4. RENDERIZADO CONDICIONAL
   // ============================================================
+
+  // No renderizar nada en el servidor, solo en el cliente
+  if (!isMounted) {
+    return null;
+  }
 
   if (loadingUser) {
     return (
